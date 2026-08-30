@@ -19,7 +19,8 @@ export function Card({
       style={{
         background: theme.cardBg,
         border: `1px solid ${theme.border}`,
-        borderRadius: 16,
+        borderRadius: 12,
+        transition: "box-shadow 200ms cubic-bezier(0.4, 0, 0.6, 1), background-color 150ms cubic-bezier(0.4, 0, 0.6, 1)",
         padding: pad,
         boxShadow: theme.shadow,
         ...style,
@@ -82,7 +83,8 @@ export function Button({
       disabled={disabled}
       style={{
         cursor: disabled ? "default" : "pointer",
-        borderRadius: 10,
+        borderRadius: 980,
+        transition: "background-color 150ms cubic-bezier(0.4, 0, 0.6, 1), opacity 150ms",
         padding: pad,
         fontSize,
         fontWeight: 600,
@@ -91,7 +93,6 @@ export function Button({
         alignItems: "center",
         gap: 7,
         whiteSpace: "nowrap",
-        transition: "opacity 120ms ease",
         ...palettes[variant],
       }}
     >
@@ -141,7 +142,7 @@ export function Segmented<T extends string>({
               background: active ? "#fff" : "transparent",
               fontWeight: active ? 600 : 500,
               boxShadow: active ? "0 1px 2px rgba(17,20,25,0.12)" : "none",
-              transition: "color 120ms ease",
+              transition: "color 150ms cubic-bezier(0.4, 0, 0.6, 1), background-color 150ms cubic-bezier(0.4, 0, 0.6, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.6, 1)",
             }}
           >
             {o.label}

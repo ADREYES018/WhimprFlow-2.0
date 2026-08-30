@@ -21,6 +21,7 @@ export const palette = {
   accent400: "#3FE0D0",
   accent500: "#22C3B6",
   accent600: "#12A99D",
+  accentDeep: "#0e877c",
   accentGlow: "rgba(58,232,216,0.45)",
 
   // Pale mint pill text + waveform bars.

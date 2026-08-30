@@ -9,7 +9,8 @@ export type BarState =
   | "transcribing"
   | "done"
   | "cancelled"
-  | "error";
+  | "error"
+  | "command";
 
 type StateEvent = { state: BarState };
 type WaveformEvent = { bars: number[] };
@@ -144,8 +145,11 @@ export function FlowBar() {
   const isIdle = state === "idle";
   const processing = state === "transcribing";
   const isError = state === "error";
+  const isCommand = state === "command";
   const statusText =
-    state === "transcribing"
+    state === "command"
+      ? "Executing Command…"
+      : state === "transcribing"
       ? "Cleaning up…"
       : isError
         ? errorText?.headline ?? "Something's off"
@@ -162,6 +166,8 @@ export function FlowBar() {
       ? { w: 250, h: 44 }
       : isError
         ? { w: 280, h: 36 }
+        : isCommand
+        ? { w: 220, h: 36 }
         : { w: 180, h: 36 };
 
   return (
@@ -187,7 +193,7 @@ export function FlowBar() {
           height: dims.h,
           width: dims.w,
           padding: recording ? "0 8px" : 0,
-          background: pillFill.base,
+          background: isCommand ? (palette as any).accentDeep || "#0e877c" : pillFill.base,
           border: `1px solid rgba(255,255,255,0.10)`,
           borderRadius: 9999,
           boxShadow: pillFill.shadow,
@@ -205,6 +211,10 @@ export function FlowBar() {
             </div>
             <StopButton />
           </>
+        ) : isCommand ? (
+          <span style={{ color: "#fff", display: "flex", alignItems: "center", gap: 6 }}>
+            ✨ {statusText}
+          </span>
         ) : processing ? (
           <span style={{ color: palette.pillTextMuted }}>{statusText}</span>
         ) : (

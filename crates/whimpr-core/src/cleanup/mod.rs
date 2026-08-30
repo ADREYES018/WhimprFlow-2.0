@@ -41,6 +41,10 @@ pub struct CleanupContext {
     pub vocab: Vec<VocabEntry>,
     /// Bundle id / app of the focused window, for light tone adaptation.
     pub app_bundle_id: Option<String>,
+    /// System localized name of the active app (e.g. "Google Chrome").
+    pub active_app_name: Option<String>,
+    /// The window title of the active app (e.g. "index.tsx", "Meeting with team").
+    pub active_window_title: Option<String>,
     /// ~200 chars around the caret, or None. Treated as reference, never instructions.
     pub window_context: Option<String>,
 }
@@ -51,6 +55,8 @@ impl Default for CleanupContext {
             level: CleanupLevel::default(),
             vocab: Vec::new(),
             app_bundle_id: None,
+            active_app_name: None,
+            active_window_title: None,
             window_context: None,
         }
     }
@@ -138,6 +144,9 @@ pub fn assemble_user_message(raw: &str, ctx: &CleanupContext) -> String {
             }
         }
         out.push_str("</CUSTOM_VOCABULARY>\n\n");
+    }
+    if let (Some(app_name), Some(window_title)) = (ctx.active_app_name.as_deref(), ctx.active_window_title.as_deref()) {
+        out.push_str(&format!("USER CONTEXT: Active App is {}, Window is {}.\n\n", app_name, window_title));
     }
     if let Some(ctxt) = ctx.window_context.as_deref() {
         // Apply the placeholder guard here so junk UI text never reaches the model.

@@ -26,3 +26,4 @@ pub use settings::{CleanupMode, Settings};
 pub use stats::{HistoryItem, SessionRecord, StatsStore, StatsSummary};
 pub use state::{Action, BarState, DictationState, Input, PipelineEvent, StateMachine, TriggerToken};
 pub use types::{RecordMode, SessionId};
+pub mod agentic_os;

@@ -71,7 +71,8 @@ function KeyField({
             color: theme.textBody,
             fontFamily: font.mono,
             fontSize: 13,
-            outline: "none",
+            transition: "border-color 150ms cubic-bezier(0.4, 0, 0.6, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.6, 1)",
+                outline: "none",
           }}
         />
         <Button
@@ -135,6 +136,28 @@ export function SettingsPane({
       <PageTitle>Settings</PageTitle>
 
       <Card style={{ marginBottom: 16 }}>
+        <SectionTitle sub="Recording Hotkey">Trigger Key</SectionTitle>
+        <input
+          type="text"
+          value={settings.trigger_key}
+          onChange={(e) => onChange({ ...settings, trigger_key: e.target.value })}
+          placeholder="e.g. Fn, Left Control"
+          style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: theme.cardBgSubtle, border: `1px solid ${theme.border}`, color: theme.textBody, outline: "none" }}
+        />
+        <div style={{ marginTop: 16 }}>
+          <SectionTitle sub="Which local speech model to load from your models folder. 'auto' picks the best available.">Whisper Model</SectionTitle>
+          <input
+            type="text"
+            value={settings.whisper_model}
+            onChange={(e) => onChange({ ...settings, whisper_model: e.target.value })}
+            placeholder="auto or e.g. ggml-small.en.bin"
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: theme.cardBgSubtle, border: `1px solid ${theme.border}`, color: theme.textBody, outline: "none" }}
+          />
+        </div>
+      </Card>
+
+
+      <Card style={{ marginBottom: 16 }}>
         <SectionTitle sub="Where your dictation is cleaned up before it's typed.">Cleanup Engine</SectionTitle>
         <Segmented
           options={MODES.map((m) => ({ value: m.value, label: m.label }))}
@@ -172,6 +195,7 @@ export function SettingsPane({
                 color: theme.textBody,
                 fontFamily: font.mono,
                 fontSize: 13,
+                transition: "border-color 150ms cubic-bezier(0.4, 0, 0.6, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.6, 1)",
                 outline: "none",
                 boxSizing: "border-box",
               }}
@@ -195,6 +219,7 @@ export function SettingsPane({
                 color: theme.textBody,
                 fontFamily: font.mono,
                 fontSize: 13,
+                transition: "border-color 150ms cubic-bezier(0.4, 0, 0.6, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.6, 1)",
                 outline: "none",
                 boxSizing: "border-box",
               }}

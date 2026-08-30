@@ -22,6 +22,9 @@ pub enum CleanupMode {
     Anthropic,
 }
 
+fn default_trigger_key() -> String { "Fn".to_string() }
+fn default_whisper_model() -> String { "auto".to_string() }
+
 /// Persisted user configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -36,6 +39,12 @@ pub struct Settings {
     pub anthropic_model: String,
     /// Play the record-start ping.
     pub sound_on_start: bool,
+    /// The hotkey used to trigger recording (e.g. "Fn", "Left Control", "Right Alt")
+    #[serde(default = "default_trigger_key")]
+    pub trigger_key: String,
+    /// The ASR model file to use (e.g. "ggml-small.en.bin"). "auto" picks the largest available.
+    #[serde(default = "default_whisper_model")]
+    pub whisper_model: String,
 }
 
 impl Default for Settings {
@@ -47,6 +56,8 @@ impl Default for Settings {
             openai_base_url: String::new(),
             anthropic_model: "claude-haiku-4-5".to_string(),
             sound_on_start: true,
+            trigger_key: default_trigger_key(),
+            whisper_model: default_whisper_model(),
         }
     }
 }

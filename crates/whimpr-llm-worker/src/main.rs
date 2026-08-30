@@ -52,7 +52,13 @@ fn main() -> anyhow::Result<()> {
     let model_path = std::env::args()
         .nth(1)
         .or_else(|| std::env::var("WHIMPR_LLM_MODEL").ok())
+        .or_else(|| std::env::var("HOME").ok().map(|h| format!("{}/Library/Application Support/dev.oatmeal.app/models/qwen2.5-3b-instruct-q4_k_m.gguf", h)))
         .context("model path required (argv[1] or WHIMPR_LLM_MODEL)")?;
+        
+    // PHASE 2 NOTE for Agentic OS:
+    // To strictly enforce JSON schema output via GBNF, we would instantiate a LlamaGrammar
+    // parsed from a JSON EBNF string and attach it to the LlamaSampler here. 
+    // For now, we trust the system prompt instruction format.
 
     let backend = LlamaBackend::init()?;
     // Offload everything to the Apple GPU (Metal) — capped by what fits.

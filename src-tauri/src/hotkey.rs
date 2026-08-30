@@ -325,7 +325,7 @@ mod imp {
     /// Clean a raw transcript per the current settings (mode + level), feeding in the
     /// dictionary vocabulary relevant to this utterance. Falls back to raw whenever
     /// cleanup is off, the provider is unavailable, it errors, or the gates reject it.
-    fn clean_transcript(raw: &str) -> String {
+    fn clean_transcript(raw: &str, active_app: Option<String>, active_window: Option<String>) -> String {
         let settings = current_settings();
         let level = settings.cleanup_level;
         if matches!(settings.cleanup_mode, CleanupMode::Raw) || level.bypasses_llm() {
@@ -351,6 +351,8 @@ mod imp {
             level,
             vocab,
             app_bundle_id,
+            active_app_name: active_app,
+            active_window_title: active_window,
             ..Default::default()
         };
         // Run the on-device model with the same prompt + per-app formatting.
@@ -529,9 +531,57 @@ mod imp {
                         Ok(t) => {
                             let raw = t.text;
                             eprintln!("[whimpr] TRANSCRIPT: \"{}\"", raw);
-                            // Clean the transcript (cloud LLM if configured), then paste.
-                            let text = clean_transcript(&raw);
-                            if text != raw {
+                            
+                            // Get active context before cleanup
+                            let active_app = whimpr_core::agentic_os::get_frontmost_app().unwrap_or_default();
+                            let active_window = whimpr_core::agentic_os::get_active_window_title().unwrap_or_default();
+                            eprintln!("[whimpr] Context -> app: {}, window: {}", active_app, active_window);
+
+                            // The LLM now returns JSON
+                            let json_text = clean_transcript(
+                                &raw, 
+                                if active_app.is_empty() { None } else { Some(active_app) }, 
+                                if active_window.is_empty() { None } else { Some(active_window) }
+                            );
+                            
+                            // Parse Agentic OS JSON
+                            #[derive(serde::Deserialize)]
+                            struct AgenticParams {
+                                #[serde(rename = "type")]
+                                kind: String,
+                                text_to_paste: Option<String>,
+                                command_intent: Option<String>,
+                                command_target: Option<String>
+                            }
+
+                            let maybe_parsed: Result<AgenticParams, _> = serde_json::from_str(&json_text);
+                            let text = match maybe_parsed {
+                                Ok(params) if params.kind == "command" => {
+                                    eprintln!("[whimpr] COMMAND INTENT DETECTED: {:?}", params.command_intent);
+                                    let intent = params.command_intent.as_deref().unwrap_or("");
+                                    let target = params.command_target.as_deref().unwrap_or("");
+                                    
+                                    // Make pill shift to command mode color
+                                    // Fire "whimpr://flowbar/state" "command"
+                                    let _ = app2.emit("whimpr://flowbar/state", serde_json::json!({ "state": "command" }));
+                                    
+                                    if let Err(e) = whimpr_core::agentic_os::execute_system_command(intent, target) {
+                                        eprintln!("[whimpr] Command failed: {}", e);
+                                    }
+                                    
+                                    // Wait brief moment for user to see the neon command pill
+                                    std::thread::sleep(std::time::Duration::from_millis(800));
+                                    
+                                    String::new() // return empty string so paste skips
+                                },
+                                Ok(params) => params.text_to_paste.unwrap_or_else(|| json_text.clone()),
+                                Err(_) => {
+                                    eprintln!("[whimpr] JSON parse failed, returning raw LLM output.");
+                                    json_text
+                                }
+                            };
+
+                            if text != raw && !text.is_empty() {
                                 eprintln!("[whimpr] CLEANED:   \"{}\"", text);
                             }
                             if !text.is_empty() {

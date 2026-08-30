@@ -14,6 +14,8 @@ export interface Settings {
   openai_base_url: string;
   anthropic_model: string;
   sound_on_start: boolean;
+  trigger_key: string;
+  whisper_model: string;
 }
 
 export interface Status {
@@ -57,6 +59,8 @@ export const DEFAULT_SETTINGS: Settings = {
   openai_base_url: "",
   anthropic_model: "claude-haiku-4-5",
   sound_on_start: true,
+  trigger_key: "Fn",
+  whisper_model: "auto",
 };
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
