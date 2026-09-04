@@ -117,6 +117,10 @@ mod imp {
     static SETTINGS: OnceLock<Mutex<whimpr_core::Settings>> = OnceLock::new();
     static DICTIONARY: OnceLock<Mutex<whimpr_core::DictionaryStore>> = OnceLock::new();
     static STATS: OnceLock<Mutex<whimpr_core::StatsStore>> = OnceLock::new();
+    static SNIPPETS: OnceLock<Mutex<whimpr_core::SnippetStore>> = OnceLock::new();
+    static STYLE: OnceLock<Mutex<whimpr_core::StyleStore>> = OnceLock::new();
+    static TRANSFORMS: OnceLock<Mutex<whimpr_core::TransformStore>> = OnceLock::new();
+    static SCRATCHPAD: OnceLock<Mutex<whimpr_core::Scratchpad>> = OnceLock::new();
 
     #[derive(Clone, Serialize)]
     struct BarPayload {
@@ -166,6 +170,10 @@ mod imp {
     fn stats_path() -> PathBuf {
         support_dir().join("stats.json")
     }
+    fn snippets_path() -> PathBuf { support_dir().join("snippets.json") }
+    fn style_path() -> PathBuf { support_dir().join("style.json") }
+    fn transforms_path() -> PathBuf { support_dir().join("transforms.json") }
+    fn scratchpad_path() -> PathBuf { support_dir().join("scratchpad.json") }
 
     /// Seconds since the Unix epoch (UTC), or 0 if the clock is before the epoch.
     fn unix_now() -> u64 {
@@ -217,6 +225,93 @@ mod imp {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    fn snippets() -> &'static Mutex<whimpr_core::SnippetStore> {
+        SNIPPETS.get_or_init(|| Mutex::new(whimpr_core::SnippetStore::load(&snippets_path())))
+    }
+    fn style() -> &'static Mutex<whimpr_core::StyleStore> {
+        STYLE.get_or_init(|| Mutex::new(whimpr_core::StyleStore::load(&style_path())))
+    }
+    fn transforms() -> &'static Mutex<whimpr_core::TransformStore> {
+        TRANSFORMS.get_or_init(|| Mutex::new(whimpr_core::TransformStore::load(&transforms_path())))
+    }
+    fn scratchpad() -> &'static Mutex<whimpr_core::Scratchpad> {
+        SCRATCHPAD.get_or_init(|| Mutex::new(whimpr_core::Scratchpad::load(&scratchpad_path())))
+    }
+
+    pub fn snippets_all() -> Vec<whimpr_core::Snippet> { snippets().lock().unwrap().entries.clone() }
+
+    pub fn snippet_add(trigger: String, expansion: String) {
+        let mut s = snippets().lock().unwrap();
+        s.add(trigger, expansion);
+        let _ = s.save(&snippets_path());
+    }
+
+    pub fn snippet_update(trigger: String, expansion: String, enabled: bool) {
+        let mut s = snippets().lock().unwrap();
+        s.update(&trigger, expansion, enabled);
+        let _ = s.save(&snippets_path());
+    }
+
+    pub fn snippet_remove(trigger: &str) {
+        let mut s = snippets().lock().unwrap();
+        s.remove(trigger);
+        let _ = s.save(&snippets_path());
+    }
+
+    pub fn transforms_all() -> Vec<whimpr_core::Transform> {
+        transforms().lock().unwrap().entries.clone()
+    }
+
+    pub fn transform_add(t: whimpr_core::Transform) {
+        let mut s = transforms().lock().unwrap();
+        s.add(t);
+        let _ = s.save(&transforms_path());
+    }
+
+    pub fn transform_update(t: whimpr_core::Transform) {
+        let mut s = transforms().lock().unwrap();
+        s.update(t);
+        let _ = s.save(&transforms_path());
+    }
+
+    pub fn transform_remove(id: &str) -> bool {
+        let mut s = transforms().lock().unwrap();
+        let ok = s.remove(id);
+        let _ = s.save(&transforms_path());
+        ok
+    }
+
+    pub fn scratchpad_get() -> whimpr_core::Scratchpad { scratchpad().lock().unwrap().clone() }
+
+    pub fn scratchpad_set_text(text: String) {
+        let mut s = scratchpad().lock().unwrap();
+        s.set_text(text);
+        let _ = s.save(&scratchpad_path());
+    }
+
+    pub fn scratchpad_set_capture(on: bool) {
+        let mut s = scratchpad().lock().unwrap();
+        s.set_capture(on);
+        let _ = s.save(&scratchpad_path());
+    }
+
+    #[allow(dead_code)]
+    pub fn scratchpad_append(block: &str) {
+        let mut s = scratchpad().lock().unwrap();
+        s.append(block);
+        let _ = s.save(&scratchpad_path());
+    }
+
+    pub fn style_get() -> whimpr_core::StyleStore { style().lock().unwrap().clone() }
+
+    /// Mutate the style store and persist. Every style command goes through this
+    /// so there is exactly one save path.
+    pub fn style_mutate(f: impl FnOnce(&mut whimpr_core::StyleStore)) {
+        let mut s = style().lock().unwrap();
+        f(&mut s);
+        let _ = s.save(&style_path());
     }
 
     /// Add a manual dictionary entry and persist.
@@ -443,7 +538,7 @@ mod imp {
                             &whimpr_core::cleanup::post_process(&text),
                             &vocab,
                         );
-                        if whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level).passed() {
+                        if whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level, false).passed() {
                             text
                         } else {
                             eprintln!("[whimpr] cleanup gate rejected the edit — pasting raw");
@@ -977,6 +1072,10 @@ mod imp {
 pub use imp::{
     current_settings, dictionary_add, dictionary_entries, dictionary_learn, dictionary_remove,
     history, install, rebuild_providers, stats_summary, update_settings,
+    snippets_all, snippet_add, snippet_update, snippet_remove,
+    transforms_all, transform_add, transform_update, transform_remove,
+    scratchpad_get, scratchpad_set_text, scratchpad_set_capture,
+    style_get, style_mutate,
 };
 
 // Windows uses the real (but unverified) platform layer in `crate::win`.

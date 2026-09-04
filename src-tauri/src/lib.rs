@@ -156,6 +156,84 @@ fn remove_dictionary_entry(correct: String) {
     hotkey::dictionary_remove(&correct);
 }
 
+#[tauri::command]
+fn get_snippets() -> Vec<whimpr_core::Snippet> { hotkey::snippets_all() }
+
+#[tauri::command]
+fn add_snippet(trigger: String, expansion: String) { hotkey::snippet_add(trigger, expansion) }
+
+#[tauri::command]
+fn update_snippet(trigger: String, expansion: String, enabled: bool) {
+    hotkey::snippet_update(trigger, expansion, enabled)
+}
+
+#[tauri::command]
+fn remove_snippet(trigger: String) { hotkey::snippet_remove(&trigger) }
+
+#[tauri::command]
+fn get_transforms() -> Vec<whimpr_core::Transform> { hotkey::transforms_all() }
+
+#[tauri::command]
+fn add_transform(transform: whimpr_core::Transform) { hotkey::transform_add(transform) }
+
+#[tauri::command]
+fn update_transform(transform: whimpr_core::Transform) { hotkey::transform_update(transform) }
+
+#[tauri::command]
+fn remove_transform(id: String) -> bool { hotkey::transform_remove(&id) }
+
+#[tauri::command]
+fn get_scratchpad() -> whimpr_core::Scratchpad { hotkey::scratchpad_get() }
+
+#[tauri::command]
+fn set_scratchpad_text(text: String) { hotkey::scratchpad_set_text(text) }
+
+#[tauri::command]
+fn set_scratchpad_capture(on: bool) { hotkey::scratchpad_set_capture(on) }
+
+#[tauri::command]
+fn get_style() -> whimpr_core::StyleStore { hotkey::style_get() }
+
+#[tauri::command]
+fn add_style_sample(text: String) {
+    hotkey::style_mutate(|s| s.samples.push(text));
+}
+
+#[tauri::command]
+fn remove_style_sample(index: usize) {
+    hotkey::style_mutate(|s| {
+        if index < s.samples.len() {
+            s.samples.remove(index);
+        }
+    });
+}
+
+#[tauri::command]
+fn set_style_profile(profile: whimpr_core::StyleProfile) {
+    hotkey::style_mutate(|s| s.base = Some(profile));
+}
+
+#[tauri::command]
+fn set_style_context(context: whimpr_core::StyleContext) {
+    hotkey::style_mutate(|s| s.set_context(context));
+}
+
+#[tauri::command]
+fn remove_style_context(id: String) {
+    hotkey::style_mutate(|s| s.remove_context(&id));
+}
+
+#[tauri::command]
+fn set_style_auto_learn(on: bool) {
+    hotkey::style_mutate(|s| s.auto_learn = on);
+}
+
+#[tauri::command]
+fn accept_pending_style() { hotkey::style_mutate(|s| s.accept_pending()); }
+
+#[tauri::command]
+fn discard_pending_style() { hotkey::style_mutate(|s| s.discard_pending()); }
+
 /// Permission + capability status shown in the Hub.
 #[derive(Clone, Serialize)]
 struct StatusReport {
@@ -292,7 +370,27 @@ pub fn run() {
             request_accessibility,
             request_input_monitoring,
             set_api_key,
-            list_models
+            list_models,
+            get_snippets,
+            add_snippet,
+            update_snippet,
+            remove_snippet,
+            get_transforms,
+            add_transform,
+            update_transform,
+            remove_transform,
+            get_scratchpad,
+            set_scratchpad_text,
+            set_scratchpad_capture,
+            get_style,
+            add_style_sample,
+            remove_style_sample,
+            set_style_profile,
+            set_style_context,
+            remove_style_context,
+            set_style_auto_learn,
+            accept_pending_style,
+            discard_pending_style
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
