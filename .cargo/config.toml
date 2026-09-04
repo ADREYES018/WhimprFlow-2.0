@@ -2,4 +2,9 @@
 rustflags = [
     "-L", "/Library/Developer/CommandLineTools/usr/lib/swift/macosx",
     "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
+    # whisper-rs 0.16's ggml-metal-device.m uses @available, which lowers to
+    # ___isPlatformVersionAtLeast. Rust links with -nodefaultlibs, so clang's
+    # runtime is not pulled in automatically and the release link fails on that
+    # symbol. Debug links fine, so this only ever showed up in a bundle build.
+    "-C", "link-arg=/Library/Developer/CommandLineTools/usr/lib/clang/17.0.0/lib/darwin/libclang_rt.osx.a",
 ]
