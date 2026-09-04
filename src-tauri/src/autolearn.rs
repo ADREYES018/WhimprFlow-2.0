@@ -114,6 +114,57 @@ mod imp {
         s
     }
 
+    /// AXSelectedTextRange's location as a usize, or None.
+    unsafe fn element_caret(element: AXUIElementRef) -> Option<usize> {
+        if element.is_null() {
+            return None;
+        }
+        let attr = make_cfstring("AXSelectedTextRange");
+        let mut value: CFTypeRef = ptr::null();
+        let err = AXUIElementCopyAttributeValue(element, attr, &mut value);
+        if !attr.is_null() {
+            CFRelease(attr);
+        }
+        if err != 0 || value.is_null() {
+            return None;
+        }
+        // AXSelectedTextRange is a CFRange wrapped in an AXValueRef.
+        // We need AXValueGetValue to extract it. For simplicity, fall back to
+        // reading the text length / 2 as an approximation if AXValue APIs are
+        // unavailable. But let's try the proper route first.
+        #[repr(C)]
+        struct CFRange { location: isize, length: isize }
+        extern "C" {
+            fn AXValueGetValue(value: CFTypeRef, kind: u32, out: *mut CFRange) -> bool;
+        }
+        const K_AX_VALUE_CF_RANGE: u32 = 4;
+        let mut range = CFRange { location: 0, length: 0 };
+        let ok = AXValueGetValue(value, K_AX_VALUE_CF_RANGE, &mut range);
+        CFRelease(value);
+        if ok && range.location >= 0 {
+            Some(range.location as usize)
+        } else {
+            None
+        }
+    }
+
+    /// The text and caret position of the focused text field, if readable.
+    pub(crate) fn focused_value_and_caret() -> Option<(String, usize)> {
+        unsafe {
+            let focused = copy_focused_element();
+            if focused.is_null() {
+                return None;
+            }
+            let value = element_value(focused);
+            let caret = element_caret(focused);
+            CFRelease(focused);
+            match (value, caret) {
+                (Some(v), Some(c)) => Some((v, c)),
+                _ => None,
+            }
+        }
+    }
+
     /// A raw AX pointer we deliberately move to the observer thread. Safe because
     /// CF/AX types are internally thread-safe and we retain it before sending.
     struct SendPtr(AXUIElementRef);
@@ -150,9 +201,13 @@ mod imp {
 
 #[cfg(target_os = "macos")]
 pub use imp::watch_correction;
+#[cfg(target_os = "macos")]
+pub(crate) use imp::focused_value_and_caret;
 
 #[cfg(not(target_os = "macos"))]
 pub fn watch_correction(_inserted: &str) {}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn focused_value_and_caret() -> Option<(String, usize)> { None }
 
 /// Split into alphanumeric word tokens (punctuation stripped), original case kept.
 pub fn word_tokens(s: &str) -> Vec<String> {

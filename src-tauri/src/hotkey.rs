@@ -447,6 +447,25 @@ mod imp {
             }
         }
     }
+    /// Roughly 200 characters around the caret in the focused text field, for
+    /// the cleanup prompt's context block. `None` when there is no text field,
+    /// no Accessibility permission, or nothing readable.
+    ///
+    /// Reference material only. `assemble_user_message` tags it so the model
+    /// never reads it as instructions.
+    #[cfg(target_os = "macos")]
+    fn caret_context() -> Option<String> {
+        const WINDOW: usize = 200;
+        let (value, caret) = crate::autolearn::focused_value_and_caret()?;
+        let start = caret.saturating_sub(WINDOW / 2);
+        let end = (caret + WINDOW / 2).min(value.len());
+        let slice = value.get(start..end)?;
+        let trimmed = slice.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn caret_context() -> Option<String> { None }
 
     /// Clean a raw transcript per the current settings (mode + level), feeding in the
     /// dictionary vocabulary relevant to this utterance. Falls back to raw whenever
@@ -481,13 +500,20 @@ mod imp {
         if let Some(app) = app_bundle_id.as_deref() {
             eprintln!("[whimpr] cleanup target app: {app}");
         }
+        let settings = current_settings();
+        let style_profile = if settings.style_enabled {
+            style().lock().unwrap().resolve(app_bundle_id.as_deref()).cloned()
+        } else {
+            None
+        };
         let ctx = CleanupContext {
             level,
             vocab: vocab.clone(),
             app_bundle_id,
             active_app_name: active_app,
             active_window_title: active_window,
-            ..Default::default()
+            window_context: caret_context(),
+            style: style_profile,
         };
         // Run the on-device model with the same prompt + per-app formatting.
         let run_local = || -> Option<anyhow::Result<String>> {
@@ -542,7 +568,7 @@ mod imp {
                             &whimpr_core::cleanup::post_process(&text),
                             &vocab,
                         );
-                        if whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level, false).passed() {
+                        if whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level, settings.style_enabled).passed() {
                             text
                         } else {
                             eprintln!("[whimpr] cleanup gate rejected the edit — pasting raw");
