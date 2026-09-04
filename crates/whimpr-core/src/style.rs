@@ -131,6 +131,55 @@ impl StyleStore {
     }
 }
 
+/// The prompt that turns writing samples into a profile. Asks for constraints,
+/// never for example sentences, so nothing from a sample can be echoed back into
+/// the user's pasted text later.
+pub const DERIVE_PROMPT: &str = "\
+Below are writing samples from one person. Describe their writing as constraints \
+another writer could follow. Reply with JSON only, no prose, in exactly this shape:
+
+{\"avg_sentence_words\": <integer>, \"contractions\": <true|false>, \
+\"punctuation_notes\": \"<short phrase>\", \"banned_words\": [\"<word>\"], \
+\"tone_notes\": \"<one or two sentences>\"}
+
+Do not quote or paraphrase any sample. Describe only.
+
+SAMPLES:
+{input}";
+
+/// Parse a model response into a profile, tolerating a markdown code fence.
+/// Returns `None` for anything that is not the expected JSON.
+pub fn parse_profile(response: &str) -> Option<StyleProfile> {
+    let start = response.find('{')?;
+    let end = response.rfind('}')?;
+    let json = response.get(start..=end)?;
+
+    #[derive(Deserialize)]
+    struct Raw {
+        avg_sentence_words: u32,
+        contractions: bool,
+        #[serde(default)]
+        punctuation_notes: String,
+        #[serde(default)]
+        banned_words: Vec<String>,
+        #[serde(default)]
+        tone_notes: String,
+    }
+
+    let raw: Raw = serde_json::from_str(json).ok()?;
+    Some(StyleProfile {
+        avg_sentence_words: raw.avg_sentence_words,
+        contractions: raw.contractions,
+        punctuation_notes: raw.punctuation_notes,
+        banned_words: raw.banned_words,
+        tone_notes: raw.tone_notes,
+        derived_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(1),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +251,32 @@ mod tests {
         s.discard_pending();
         assert_eq!(s.base.unwrap().tone_notes, "old");
         assert!(s.pending.is_none());
+    }
+
+    #[test]
+    fn parse_profile_reads_the_model_json() {
+        let json = r#"{
+            "avg_sentence_words": 11,
+            "contractions": true,
+            "punctuation_notes": "no em-dashes, commas over semicolons",
+            "banned_words": ["game-changer", "leverage"],
+            "tone_notes": "Casual and direct, confident without posturing"
+        }"#;
+        let p = parse_profile(json).expect("must parse");
+        assert_eq!(p.avg_sentence_words, 11);
+        assert_eq!(p.banned_words.len(), 2);
+        assert!(p.derived_at > 0);
+    }
+
+    #[test]
+    fn parse_profile_survives_a_fenced_response() {
+        let fenced = "```json\n{\"avg_sentence_words\":9,\"contractions\":false,\
+                      \"punctuation_notes\":\"\",\"banned_words\":[],\"tone_notes\":\"Dry\"}\n```";
+        assert_eq!(parse_profile(fenced).unwrap().avg_sentence_words, 9);
+    }
+
+    #[test]
+    fn parse_profile_rejects_junk() {
+        assert!(parse_profile("I'm sorry, I can't do that.").is_none());
     }
 }

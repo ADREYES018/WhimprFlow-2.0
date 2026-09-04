@@ -198,6 +198,16 @@ mod imp {
             store.record(words, duration_ms, chars, unix_now(), text.to_string(), app);
             let _ = store.save(&stats_path());
         }
+
+        // Auto-learn: count accepted dictations and, every DERIVE_EVERY, propose a
+        // re-derived profile. The proposal is never applied without an explicit
+        // accept in the Style pane, so the voice cannot drift on its own.
+        style_mutate(|s| {
+            if !s.auto_learn || s.pending.is_some() {
+                return;
+            }
+            s.dictations_since_derive += 1;
+        });
     }
 
     /// The most recent dictations for the Hub Home history list.

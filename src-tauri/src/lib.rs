@@ -234,6 +234,34 @@ fn accept_pending_style() { hotkey::style_mutate(|s| s.accept_pending()); }
 #[tauri::command]
 fn discard_pending_style() { hotkey::style_mutate(|s| s.discard_pending()); }
 
+#[tauri::command]
+fn derive_style_profile() -> Option<whimpr_core::StyleProfile> {
+    let samples = hotkey::style_get().samples;
+    if samples.is_empty() {
+        return None;
+    }
+    let prompt = whimpr_core::style::DERIVE_PROMPT.replace("{input}", &samples.join("\n\n---\n\n"));
+    let response = local_llm::complete(&prompt).ok()?;
+    let profile = whimpr_core::style::parse_profile(&response)?;
+    let p = profile.clone();
+    hotkey::style_mutate(move |s| s.base = Some(p));
+    Some(profile)
+}
+
+#[tauri::command]
+fn propose_style_profile() -> Option<whimpr_core::StyleProfile> {
+    let recent: Vec<String> = hotkey::history(50).into_iter().map(|h| h.text).collect();
+    if recent.is_empty() {
+        return None;
+    }
+    let prompt = whimpr_core::style::DERIVE_PROMPT.replace("{input}", &recent.join("\n\n---\n\n"));
+    let response = local_llm::complete(&prompt).ok()?;
+    let profile = whimpr_core::style::parse_profile(&response)?;
+    let p = profile.clone();
+    hotkey::style_mutate(move |s| s.pending = Some(p));
+    Some(profile)
+}
+
 /// Permission + capability status shown in the Hub.
 #[derive(Clone, Serialize)]
 struct StatusReport {
@@ -390,7 +418,9 @@ pub fn run() {
             remove_style_context,
             set_style_auto_learn,
             accept_pending_style,
-            discard_pending_style
+            discard_pending_style,
+            derive_style_profile,
+            propose_style_profile
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
