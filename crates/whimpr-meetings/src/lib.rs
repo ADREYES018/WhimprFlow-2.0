@@ -6,6 +6,8 @@ pub mod chat;
 pub mod transcribe;
 pub mod sleep;
 pub mod live;
+pub mod apple_calendar;
+pub use apple_calendar as calendar;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
