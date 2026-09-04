@@ -634,13 +634,19 @@ pub enum MicError {
 static ACTIVE: Mutex<Option<MicRecorder>> = Mutex::new(None);
 
 pub fn start_mic_recording(path: PathBuf) -> Result<(), MicError> {
+    start_mic_recording_with_tap(path, None)
+}
+
+/// As `start_mic_recording`, but also mirror the captured audio into `tap` so a
+/// consumer can transcribe it live.
+pub fn start_mic_recording_with_tap(path: PathBuf, tap: Option<Lane>) -> Result<(), MicError> {
     let mut slot = ACTIVE
         .lock()
         .map_err(|_| MicError::Other("mic lock poisoned".into()))?;
     if slot.is_some() {
         return Err(MicError::AlreadyRecording);
     }
-    let recorder = MicRecorder::start(path).map_err(|e| {
+    let recorder = MicRecorder::start_with_tap(path, tap).map_err(|e| {
         let lower = e.to_lowercase();
         if lower.contains("permission")
             || lower.contains("denied")

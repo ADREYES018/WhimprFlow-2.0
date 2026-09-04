@@ -298,6 +298,15 @@ static ACTIVE: Mutex<Option<SysAudioRecorder>> = Mutex::new(None);
 /// Begin capturing system audio to `path`. Returns `Err(SysAudioError::PermissionDenied)`
 /// if screen recording permission is not granted.
 pub fn start_sysaudio_recording(path: PathBuf) -> Result<(), SysAudioError> {
+    start_sysaudio_recording_with_tap(path, None)
+}
+
+/// As `start_sysaudio_recording`, but also mirror the captured audio into `tap`
+/// so a consumer can transcribe it live.
+pub fn start_sysaudio_recording_with_tap(
+    path: PathBuf,
+    tap: Option<Lane>,
+) -> Result<(), SysAudioError> {
     if !has_screen_capture_permission() {
         return Err(SysAudioError::PermissionDenied);
     }
@@ -307,7 +316,7 @@ pub fn start_sysaudio_recording(path: PathBuf) -> Result<(), SysAudioError> {
     if slot.is_some() {
         return Err(SysAudioError::AlreadyRecording);
     }
-    let recorder = SysAudioRecorder::start(path).map_err(|e| {
+    let recorder = SysAudioRecorder::start_with_tap(path, tap).map_err(|e| {
         let lower = e.to_lowercase();
         if lower.contains("permission")
             || lower.contains("denied")

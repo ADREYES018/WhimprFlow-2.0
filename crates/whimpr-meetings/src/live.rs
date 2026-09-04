@@ -1012,6 +1012,29 @@ fn is_noise(text: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Capture does not call `Lane::push`. It pushes through `whimpr-audio`'s
+    /// `AudioTap` trait, because that crate sits below this one and cannot name
+    /// `Lane`. That bridge was a no-op stub, so no audio ever reached the tap and
+    /// the live panel stayed empty for a whole meeting while every test here
+    /// passed, since they all push into a `Tap` they built themselves.
+    #[test]
+    fn the_audio_tap_bridge_delivers_into_the_lane() {
+        let (tap, lanes) = Tap::with_lanes(1);
+        let sink: whimpr_audio::live::Lane = std::sync::Arc::new(lanes[0].clone());
+
+        // A second of 16 kHz mono at a constant level, pushed the way a capture
+        // callback would.
+        let data: Vec<f32> = vec![0.25f32; 16_000];
+        whimpr_audio::live::AudioTap::push(&*sink, &data, 1, 16_000);
+
+        let out = tap.drain();
+        assert!(!out.is_empty(), "no audio reached the tap through the bridge");
+        assert!(
+            out.iter().any(|s| (*s - 0.25).abs() < 1e-3),
+            "the samples that arrived are not the ones pushed"
+        );
+    }
+
     #[test]
     fn tap_downmixes_and_resamples_to_16k() {
         let (tap, lanes) = Tap::with_lanes(1);

@@ -228,9 +228,18 @@ pub mod sysaudio;
 pub mod mic;
 
 pub mod live {
-    #[derive(Clone)]
-    pub struct Lane {}
-    impl Lane {
-        pub fn push(&self, _frames: &[f32], _channels: u16, _sample_rate: u32) {}
+    /// A sink for captured audio, fed alongside the WAV write so a consumer can
+    /// transcribe the meeting as it happens.
+    ///
+    /// The implementation lives in `whimpr-meetings`, which owns the buffering
+    /// and resampling. This crate is the lowest layer and cannot depend on it,
+    /// hence the trait: capture pushes through it without knowing the consumer.
+    pub trait AudioTap: Send + Sync {
+        /// Append interleaved capture samples. Called from the capture thread on
+        /// every callback, so it must not block.
+        fn push(&self, frames: &[f32], channels: u16, sample_rate: u32);
     }
+
+    /// A recorder's handle to whatever is consuming the live audio.
+    pub type Lane = std::sync::Arc<dyn AudioTap>;
 }

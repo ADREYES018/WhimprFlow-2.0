@@ -10,7 +10,7 @@ pub mod apple_calendar;
 pub use apple_calendar as calendar;
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub use whimpr_media::model;
@@ -53,6 +53,59 @@ pub fn live_lines() -> Vec<LiveLine> {
         .unwrap_or_default()
 }
 
+/// Feed a live lane from `whimpr-audio`'s capture threads.
+///
+/// `whimpr-audio` sits below this crate and cannot name `live::Lane`, so it
+/// pushes through its own trait and this is the bridge.
+impl whimpr_audio::live::AudioTap for live::Lane {
+    fn push(&self, frames: &[f32], channels: u16, sample_rate: u32) {
+        live::Lane::push(self, frames, channels, sample_rate);
+    }
+}
+
+/// Lane indices handed out by `Tap::with_lanes(2)`, in order.
+const MIC_LANE: usize = 0;
+const SYS_LANE: usize = 1;
+
+/// Start both recorders, mirroring each one's audio into its own tap lane so the
+/// live transcript sees the meeting as it happens.
+///
+/// A recorder that fails to start retires its lane. Without that the live
+/// decoder waits on audio that will never arrive, which stalls the panel for the
+/// lane that did start.
+fn start_capture(tap: &Arc<live::Tap>, lanes: Vec<live::Lane>, paths: &SessionPaths) {
+    let mut lanes = lanes;
+    let sys_lane = lanes.pop();
+    let mic_lane = lanes.pop();
+
+    match mic_lane {
+        Some(lane) => {
+            let sink: whimpr_audio::live::Lane = Arc::new(lane);
+            if let Err(e) =
+                whimpr_audio::mic::start_mic_recording_with_tap(PathBuf::from(&paths.mic_wav), Some(sink))
+            {
+                eprintln!("[whimpr] mic capture did not start: {e}");
+                tap.retire(MIC_LANE);
+            }
+        }
+        None => tap.retire(MIC_LANE),
+    }
+
+    match sys_lane {
+        Some(lane) => {
+            let sink: whimpr_audio::live::Lane = Arc::new(lane);
+            if let Err(e) = whimpr_audio::sysaudio::start_sysaudio_recording_with_tap(
+                PathBuf::from(&paths.sys_wav),
+                Some(sink),
+            ) {
+                eprintln!("[whimpr] system audio capture did not start: {e}");
+                tap.retire(SYS_LANE);
+            }
+        }
+        None => tap.retire(SYS_LANE),
+    }
+}
+
 pub fn begin_session(title: &str) -> Result<SessionPaths, String> {
     begin_session_with_emitter(title, "", |_| {})
 }
@@ -71,16 +124,8 @@ pub fn begin_session_with_emitter(
     }
     let paths = session::new_session(title)?;
 
-    let (tap, mut lanes) = live::Tap::with_lanes(2);
-    let sys_lane = lanes.pop();
-    let mic_lane = lanes.pop();
-
-    if let Some(_mic_l) = mic_lane {
-        let _ = whimpr_audio::mic::start_mic_recording(PathBuf::from(&paths.mic_wav));
-    }
-    if let Some(_sys_l) = sys_lane {
-        let _ = whimpr_audio::sysaudio::start_sysaudio_recording(PathBuf::from(&paths.sys_wav));
-    }
+    let (tap, lanes) = live::Tap::with_lanes(2);
+    start_capture(&tap, lanes, &paths);
 
     let lang = if language.trim().is_empty() {
         None
@@ -114,16 +159,8 @@ pub fn continue_session_with_emitter(
     }
     let paths = session::continue_session(dir, title)?;
 
-    let (tap, mut lanes) = live::Tap::with_lanes(2);
-    let sys_lane = lanes.pop();
-    let mic_lane = lanes.pop();
-
-    if let Some(_mic_l) = mic_lane {
-        let _ = whimpr_audio::mic::start_mic_recording(PathBuf::from(&paths.mic_wav));
-    }
-    if let Some(_sys_l) = sys_lane {
-        let _ = whimpr_audio::sysaudio::start_sysaudio_recording(PathBuf::from(&paths.sys_wav));
-    }
+    let (tap, lanes) = live::Tap::with_lanes(2);
+    start_capture(&tap, lanes, &paths);
 
     let lang = if language.trim().is_empty() {
         None
