@@ -47,6 +47,38 @@ impl LocalWorker {
         }
         Ok(v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
     }
+    pub fn complete_streaming(
+        &mut self,
+        prompt: &str,
+        mut sink: impl FnMut(&str),
+    ) -> anyhow::Result<String> {
+        let msgs = vec![whimpr_core::cleanup::CleanupMsg { role: "user", content: prompt.to_string() }];
+        let req = serde_json::json!({ "messages": msgs, "max_tokens": 400, "stream": true });
+        let mut line = serde_json::to_string(&req)?;
+        line.push('\n');
+        self.stdin.write_all(line.as_bytes())?;
+        self.stdin.flush()?;
+
+        let mut final_text = String::new();
+        loop {
+            let mut resp = String::new();
+            if self.stdout.read_line(&mut resp)? == 0 {
+                anyhow::bail!("local worker closed");
+            }
+            let v: serde_json::Value = serde_json::from_str(&resp)?;
+            if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                anyhow::bail!("local llm: {err}");
+            }
+            if let Some(chunk) = v.get("chunk").and_then(|t| t.as_str()) {
+                sink(chunk);
+            }
+            if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
+                final_text = text.to_string();
+                break;
+            }
+        }
+        Ok(final_text)
+    }
 }
 
 impl Drop for LocalWorker {
@@ -157,4 +189,11 @@ pub fn complete(prompt: &str) -> anyhow::Result<String> {
     let mut guard = worker_lock.lock().unwrap();
     let worker = guard.as_mut().ok_or_else(|| anyhow::anyhow!("local LLM not available"))?;
     worker.cleanup(&msgs)
+}
+
+pub fn complete_streaming(prompt: &str, sink: impl FnMut(&str)) -> anyhow::Result<String> {
+    let worker_lock = crate::hotkey::local_worker();
+    let mut guard = worker_lock.lock().unwrap();
+    let worker = guard.as_mut().ok_or_else(|| anyhow::anyhow!("local LLM not available"))?;
+    worker.complete_streaming(prompt, sink)
 }

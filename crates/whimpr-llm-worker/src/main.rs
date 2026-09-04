@@ -36,6 +36,8 @@ struct Request {
     user: String,
     #[serde(default = "default_max")]
     max_tokens: i32,
+    #[serde(default)]
+    stream: bool,
 }
 fn default_max() -> i32 {
     400
@@ -43,7 +45,10 @@ fn default_max() -> i32 {
 
 #[derive(Serialize)]
 struct Response {
-    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chunk: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
@@ -75,15 +80,17 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
         let resp = match serde_json::from_str::<Request>(&line) {
-            Ok(req) => match generate(&backend, &model, &req) {
-                Ok(text) => Response { text, error: None },
+            Ok(req) => match generate(&backend, &model, &req, &mut stdout) {
+                Ok(text) => Response { text: Some(text), chunk: None, error: None },
                 Err(e) => Response {
-                    text: String::new(),
+                    text: None,
+                    chunk: None,
                     error: Some(e.to_string()),
                 },
             },
             Err(e) => Response {
-                text: String::new(),
+                text: None,
+                chunk: None,
                 error: Some(format!("bad request: {e}")),
             },
         };
@@ -94,7 +101,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn generate(backend: &LlamaBackend, model: &LlamaModel, req: &Request) -> anyhow::Result<String> {
+fn generate(backend: &LlamaBackend, model: &LlamaModel, req: &Request, stdout: &mut std::io::Stdout) -> anyhow::Result<String> {
     // Qwen2.5 ChatML template. Prefer the full multi-turn message list (few-shot
     // demonstrations drive the newline/list/self-correction behavior); fall back
     // to the legacy single system+user pair.
@@ -135,7 +142,18 @@ fn generate(backend: &LlamaBackend, model: &LlamaModel, req: &Request) -> anyhow
         if model.is_eog_token(token) {
             break;
         }
-        out.push_str(&model.token_to_str(token, Special::Tokenize)?);
+        let chunk_text = model.token_to_str(token, Special::Tokenize)?;
+        if req.stream {
+            let chunk_resp = Response {
+                text: None,
+                chunk: Some(chunk_text.clone()),
+                error: None,
+            };
+            serde_json::to_writer(&mut *stdout, &chunk_resp)?;
+            stdout.write_all(b"\n")?;
+            stdout.flush()?;
+        }
+        out.push_str(&chunk_text);
         batch.clear();
         batch.add(token, n_cur, &[0], true)?;
         n_cur += 1;
