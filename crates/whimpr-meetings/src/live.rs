@@ -711,12 +711,21 @@ fn run(
 
         if !is_silent(&window) {
             normalize(&mut window);
-            match transcriber.run(
-                &window,
-                language.as_deref(),
-                Quality::Fast,
-                Some(context.as_str()),
-            ) {
+            // Live transcription is the highest-priority GPU consumer: a dropped
+            // live window cannot be recovered, while dictation and study work can
+            // wait. Scoped so the gate is held across the whisper call and
+            // nothing else.
+            let decoded = {
+                let _gpu = whimpr_core::gpu_gate::global_gpu_gate()
+                    .acquire(whimpr_core::gpu_gate::Priority::LiveTranscription);
+                transcriber.run(
+                    &window,
+                    language.as_deref(),
+                    Quality::Fast,
+                    Some(context.as_str()),
+                )
+            };
+            match decoded {
                 Ok(t) => {
                     let text = strip_sound_tags(t.text.trim());
                     if !text.is_empty() && !is_noise(&text) {

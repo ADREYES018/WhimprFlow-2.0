@@ -751,7 +751,15 @@ mod imp {
                         return;
                     };
                     let pcm = whimpr_audio::resample_to_16k(&res.samples, res.sample_rate);
-                    match asr.transcribe(&pcm) {
+                    // Dictation sits below live transcription and above study
+                    // work on the GPU. Scoped so the gate covers the whisper
+                    // call and not the cleanup and routing that follow.
+                    let decoded = {
+                        let _gpu = whimpr_core::gpu_gate::global_gpu_gate()
+                            .acquire(whimpr_core::gpu_gate::Priority::Dictation);
+                        asr.transcribe(&pcm)
+                    };
+                    match decoded {
                         Ok(t) => {
                             let raw = t.text;
                             eprintln!("[whimpr] TRANSCRIPT: \"{}\"", raw);
