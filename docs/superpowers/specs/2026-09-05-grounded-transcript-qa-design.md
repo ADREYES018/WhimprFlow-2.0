@@ -8,16 +8,20 @@
 
 ## 1. Overview and Goals
 
-This feature enhances WhimprFlow's notetaker and dictation system in two complementary areas:
+This feature enhances WhimprFlow's notetaker and dictation system in three key areas:
 
-1. **Grounded Transcript Search & Q&A**:
-   * Introduces an Oatmeal-style interactive inquiry bar pinned to the bottom of the meeting view.
-   * Isolates context exclusively to the active meeting transcript ("transcript memory").
+1. **Single-Meeting Grounded Q&A (Local Memory)**:
+   * Oatmeal-style inquiry bar pinned to the bottom of the active meeting view.
+   * Scoped strictly to the selected meeting's transcript ("single transcript memory").
    * Returns structured, easy-to-read answers (concise summary, Markdown tables or bullet lists, and exact verbatim quotes).
-   * Refuses unmentioned topics cleanly with zero hallucination.
-   * Supports local execution by default via `whimpr-llm-worker`, with an optional OpenAI API key toggle for cloud processing.
+   * Refuses unmentioned topics with zero hallucination.
 
-2. **Dictation Spoken Self-Correction (Auto-Edit)**:
+2. **Global Collection Q&A (All-Transcripts Memory)**:
+   * Oatmeal-style inquiry bar on the main Library dashboard (outside individual meetings).
+   * Queries across the entire archive of recorded transcripts (`ask_library`).
+   * Synthesizes findings across multiple meetings and displays source meeting chips with dates and titles that link directly into those meetings.
+
+3. **Dictation Spoken Self-Correction (Auto-Edit)**:
    * Recognizes spoken retractions and mid-thought changes during live voice dictation (e.g. "meet at 2 PM, wait no, scratch that, make it 4 PM").
    * Resolves the correction in real time, emitting exclusively the final intended decision at the cursor.
 
@@ -25,69 +29,70 @@ This feature enhances WhimprFlow's notetaker and dictation system in two complem
 
 ## 2. Architecture and Subsystems
 
-### A. Grounded Transcript Q&A Engine
+### A. Dual-Scope Grounded Q&A Engine
 
 ```
-+----------------------------------------------------------------+
-|                       Meeting Detail View                      |
-|                                                                |
-|  [ Transcript Tab ]  [ Enhanced Notes Tab ]  [ Study Hub Tab ] |
-|                                                                |
-|  +----------------------------------------------------------+  |
-|  | Q&A Stream: Answer Cards (Tables, Bullets, Quotes)       |  |
-|  +----------------------------------------------------------+  |
-|                                                                |
-|  +----------------------------------------------------------+  |
-|  | Sticky Ask Bar: [Pills] [Rounded Input] [Send Button]    |  |
-|  +----------------------------------------------------------+  |
-+----------------------------------------------------------------+
-                                |
-                                v
-               `ask_meeting(id, question, provider)`
-                                |
-               +----------------+----------------+
-               |                                 |
-               v                                 v
-      Local LLM Worker                  OpenAI API Client
-      (Qwen 2.5 3B via llama.cpp)       (BYOK via Settings)
+[ OUTSIDE: All-Transcripts Library View ]
+  Sticky / In-flow Oatmeal Ask Bar:
+  "Ask across all your meetings..."
+              |
+              v
+        `ask_library(question)`
+              |
+        +-----+-----+
+        |           |
+        v           v
+  Local Worker   OpenAI API
+        |
+        v
+  Synthesized Answer + Meeting Source Pills [Meeting 1] [Meeting 2]
+
+----------------------------------------------------------------------
+
+[ INSIDE: Individual Meeting Detail View ]
+  Sticky Oatmeal Ask Bar:
+  "Ask anything about this meeting..."
+              |
+              v
+        `ask_meeting(id, question)`
+              |
+        +-----+-----+
+        |           |
+        v           v
+  Local Worker   OpenAI API
+        |
+        v
+  Strictly Grounded Answer (Summary, Tables, Bullets, Quotes)
 ```
 
 #### Grounding Constraints
-* **Context Boundary**: The prompt contains exclusively the text of the selected meeting transcript. Cross-transcript data and outside web knowledge are excluded.
-* **Keyword Pre-filter**: If non-stopword query terms are completely missing from the transcript, the backend returns `"That was not discussed in this recording"` immediately without executing the model.
-* **Deterministic Generation**: Temperature is locked to `0.0` to ensure repeatable, factual answers.
-* **Refusal Behavior**: If the topic cannot be substantiated by verbatim sentences in the transcript, the model explicitly states it was not discussed.
+* **Single Meeting Context Boundary**: Scoped exclusively to the selected meeting transcript. Cross-transcript data and outside web knowledge are excluded.
+* **Global Collection Context Boundary**: Scoped to the user's recorded meeting archive. Excerpts are formatted with meeting IDs, titles, and dates.
+* **Keyword Pre-filter**: If query terms are absent, returns an immediate refusal without calling the model.
+* **Deterministic Generation**: Temperature locked to `0.0`.
+* **Refusal Behavior**: If the topic cannot be substantiated by verbatim sentences, the model explicitly states it was not discussed.
 
 #### Structured Output Contract
 Every grounded response adheres to a three-tier structure:
 1. **Direct Answer**: One to two plain sentences summarizing the finding.
 2. **Structured Details**: A Markdown table (for comparisons, metrics, status tables, or multi-attribute items) or grouped bullet points.
-3. **Transcript Evidence**: Verbatim blockquote citations showing the exact phrases spoken in the recording.
+3. **Transcript Evidence / Sources**: Verbatim blockquote citations for single-meeting queries, or clickable source meeting pills for global library queries.
 
 ---
 
 ### B. Oatmeal UI Layout Specifications
 
-The UI mirrors the clean editorial layout of Oatmeal's `#viewNote` surface:
+The UI provides the Oatmeal editorial layout across both scopes:
 
-* **Container Geometry**: Centered content column (`max-width: 720px`), responsive side padding (24px to 32px).
-* **Sticky Bottom Ask Bar**:
-  * Pinned to the viewport bottom with subtle top gradient backdrop blur.
-  * **Quick Pill Suggestions**: Horizontal scrollable chips above the input:
-    * `Key decisions`
-    * `Action items`
-    * `Main topics`
-    * `Next steps`
-    * `Pillars / Takeaways`
-  * **Rounded Input**: 22px border radius, background matching card surface, subtle focus ring. Placeholder: `"Ask anything about this meeting..."`.
-  * **Submit Control**: 32px circular action button with forward arrow icon, active only when text is present.
+1. **Inside Meeting View (`viewNote` equivalent)**:
+   * Centered column (`max-width: 720px`).
+   * Pinned sticky bottom ask bar with quick pills (`Key decisions`, `Action items`, `Main topics`, `Next steps`, `Pillars / Takeaways`).
+   * Conversational Q&A card stream above the bar with question row (`›`), dismiss (`×`), copy button, and pulsing status dot.
 
-* **Conversational Q&A Stream**:
-  * Renders in flow above the ask bar.
-  * **Question Row**: Prefixed with chevron `›`, bold query title, and top-right dismiss button (`×`).
-  * **Answer Card**: Styled prose container supporting tables, monospace tokens, and quote bars.
-  * **Copy Button**: Compact action button on each card with temporary `"Copied!"` indicator.
-  * **Loading Indicator**: Animated pulsing status dot matching Oatmeal's emerald recording cluster.
+2. **Outside in Library View (`viewDash` equivalent)**:
+   * Centered inquiry section at the top of the meeting library.
+   * Rounded ask bar with placeholder: `"Ask across all your meetings (e.g. 'what did we decide about pricing?')"`
+   * Result cards displaying synthesized findings and clickable meeting source tags. Clicking a source tag opens that meeting directly.
 
 ---
 
