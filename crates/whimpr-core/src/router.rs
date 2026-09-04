@@ -261,4 +261,17 @@ mod tests {
         snips.add("my signature", "Adriel Reyes");
         assert_eq!(finalize_dictation("send my signature", &s, &snips), "send Adriel Reyes");
     }
+
+    #[test]
+    fn start_recording_intent_routes_to_command() {
+        let (s, t, sn) = fixtures();
+        assert_eq!(
+            route_by_rules("hey shrimp start recording", &s, &t, &sn),
+            Route::Command { intent: "start_recording".into(), target: String::new() }
+        );
+        assert_eq!(
+            route_by_rules("hey shrimp record this", &s, &t, &sn),
+            Route::Command { intent: "start_recording".into(), target: String::new() }
+        );
+    }
 }

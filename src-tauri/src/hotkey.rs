@@ -771,7 +771,18 @@ mod imp {
                                         "whimpr://flowbar/state",
                                         serde_json::json!({ "state": "command" }),
                                     );
-                                    if let Err(e) =
+                                    if intent == "start_recording" {
+                                        let app_clone = app2.clone();
+                                        if let Err(e) = whimpr_meetings::begin_session_with_emitter(
+                                            "Meeting",
+                                            "",
+                                            move |line| {
+                                                let _ = app_clone.emit("whimpr://live-line", line);
+                                            },
+                                        ) {
+                                            eprintln!("[whimpr] start session failed: {e}");
+                                        }
+                                    } else if let Err(e) =
                                         whimpr_core::agentic_os::execute_system_command(&intent, &target)
                                     {
                                         eprintln!("[whimpr] command failed: {e}");

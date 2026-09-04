@@ -98,7 +98,6 @@ pub fn execute_system_command(intent: &str, target: &str) -> Result<String, Stri
                 .map_err(|e| format!("Failed to open URL: {}", e))?;
             Ok(format!("Opened URL: {}", target))
         },
-        "start_recording" => handle_start_recording(),
         _ => Err(format!("Unknown intent: {}", intent)),
     }
 }
@@ -167,46 +166,4 @@ pub fn handle_ui_click(button_name: &str) -> Result<String, String> {
     
     run_applescript(&script)?;
     Ok(format!("Clicked UI element: {}", button_name))
-}
-
-/// Phase 3: Starts the Oatmeal recording server if offline, and opens it
-pub fn handle_start_recording() -> Result<String, String> {
-    // Attempt pinging Oatmeal server
-    let ping = Command::new("curl")
-        .arg("--silent")
-        .arg("--max-time")
-        .arg("1")
-        .arg("http://localhost:4123/api/health")
-        .output();
-    
-    let is_up = ping.map(|o| o.status.success()).unwrap_or(false);
-    
-    if !is_up {
-        // Try starting it in detached mode based on standard local paths or home dir
-        if let Ok(home) = std::env::var("HOME") {
-            let possible_paths = [
-                format!("{}/Adriel_2.0/oatmeal-repo/capture/server.mjs", home),
-                format!("{}/oatmeal-repo/capture/server.mjs", home)
-            ];
-            
-            for path in possible_paths.iter() {
-                if std::path::Path::new(path).exists() {
-                    let node_path = format!("{}/.local/bin/node", home);
-                    let cmd_node = if std::path::Path::new(&node_path).exists() { node_path } else { "node".to_string() };
-                    let _ = Command::new(cmd_node)
-                        .arg(path)
-                        .spawn(); // detaches
-                    std::thread::sleep(std::time::Duration::from_millis(500)); // give it a moment to bind
-                    break;
-                }
-            }
-        }
-    }
-    
-    Command::new("open")
-        .arg("http://localhost:4123")
-        .output()
-        .map_err(|e| format!("Failed to open recording server: {}", e))?;
-    
-    Ok("Opened Oatmeal recorder".to_string())
 }
