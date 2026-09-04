@@ -170,6 +170,55 @@ pub fn assemble_user_message(raw: &str, ctx: &CleanupContext) -> String {
 /// runaway blank lines. It deliberately never touches punctuation-name words or
 /// self-correction cues ("actually", "scratch that") — those are context-sensitive
 /// and stay the model's job (a bare-regex would misfire on "I actually liked it").
+/// What the model actually asked for. Since the Agentic OS prompt landed, every
+/// response is a JSON envelope, dictation included, so the pasteable text has to
+/// come out of that envelope before anything else touches it.
+///
+/// This exists because the gates compare the cleaned result against the raw
+/// transcript. Handing them the envelope instead of its `text_to_paste` compares
+/// a sentence against a blob of JSON keys and braces, which diverges so far that
+/// the gate rejects every edit and pastes the raw transcript. Cleanup looked
+/// wired up and silently did nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelResponse {
+    /// Text to clean, gate, and paste.
+    Dictate(String),
+    /// An OS action for the caller to dispatch. Never pasted, so never gated.
+    Command { intent: String, target: String },
+}
+
+/// Parse a provider response into what the caller should do with it.
+///
+/// A response that is not the expected JSON is treated as plain dictation, which
+/// is what a model that ignored the schema actually produced. That keeps the
+/// raw-transcript fallback intact instead of pasting a broken envelope.
+pub fn parse_response(raw: &str) -> ModelResponse {
+    #[derive(Deserialize)]
+    struct Envelope {
+        #[serde(rename = "type")]
+        kind: String,
+        text_to_paste: Option<String>,
+        command_intent: Option<String>,
+        command_target: Option<String>,
+    }
+
+    // Small models like to wrap JSON in a code fence or add a sentence around it.
+    let trimmed = raw.trim();
+    let slice = match (trimmed.find('{'), trimmed.rfind('}')) {
+        (Some(a), Some(b)) if b > a => &trimmed[a..=b],
+        _ => return ModelResponse::Dictate(raw.to_string()),
+    };
+
+    match serde_json::from_str::<Envelope>(slice) {
+        Ok(env) if env.kind == "command" => ModelResponse::Command {
+            intent: env.command_intent.unwrap_or_default(),
+            target: env.command_target.unwrap_or_default(),
+        },
+        Ok(env) => ModelResponse::Dictate(env.text_to_paste.unwrap_or_else(|| raw.to_string())),
+        Err(_) => ModelResponse::Dictate(raw.to_string()),
+    }
+}
+
 pub fn post_process(text: &str) -> String {
     let stripped = strip_code_fence(text);
     // Restore the break sentinels the pre-pass inserted, then catch any literal cue
@@ -292,8 +341,183 @@ fn cap_and_trim_lines(s: &str) -> String {
     lines.join("\n")
 }
 
+/// Apply the user's dictionary to `text` deterministically, replacing known
+/// mishears with the authoritative spelling.
+///
+/// The vocabulary is also handed to the model in the prompt, but a prompt is a
+/// request, not a guarantee: the model can ignore it, the gate can reject the
+/// whole edit, the provider can fail, and every one of those paths pastes raw
+/// text. Doing the substitution here means the dictionary lands on all of them,
+/// including `CleanupLevel::None`, which never calls a model at all.
+///
+/// Matching is case-insensitive and covers multi-word mishears ("charge bee" →
+/// "ChargeBee"). Only whole tokens are replaced, so "bee" inside "beeline" is
+/// left alone. Capitalisation of the entry is authoritative: it is the spelling
+/// the user asked for.
+pub fn apply_vocab(text: &str, vocab: &[VocabEntry]) -> String {
+    if vocab.is_empty() || text.is_empty() {
+        return text.to_string();
+    }
+
+    // Longest phrase first, so "charge bee card" beats "charge bee".
+    let mut pairs: Vec<(String, &str)> = Vec::new();
+    for entry in vocab {
+        for m in &entry.mishears {
+            let m = m.trim();
+            if !m.is_empty() && !m.eq_ignore_ascii_case(&entry.correct) {
+                pairs.push((m.to_lowercase(), entry.correct.as_str()));
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return text.to_string();
+    }
+    pairs.sort_by(|a, b| b.0.split_whitespace().count().cmp(&a.0.split_whitespace().count()));
+
+    // Split into words and the separators between them so all original
+    // whitespace, punctuation, and line breaks survive the rebuild.
+    let mut out = String::with_capacity(text.len());
+    let mut tokens: Vec<&str> = Vec::new();
+    let mut seps: Vec<&str> = Vec::new();
+    let mut idx = 0usize;
+    let bytes = text.as_bytes();
+    while idx < bytes.len() {
+        let start = idx;
+        while idx < bytes.len() && (bytes[idx] as char).is_whitespace() {
+            idx += 1;
+        }
+        seps.push(&text[start..idx]);
+        let tok_start = idx;
+        while idx < bytes.len() && !(bytes[idx] as char).is_whitespace() {
+            idx += 1;
+        }
+        if idx > tok_start {
+            tokens.push(&text[tok_start..idx]);
+        }
+    }
+    while seps.len() < tokens.len() + 1 {
+        seps.push("");
+    }
+
+    // Compare on the token stripped of surrounding punctuation, then put that
+    // punctuation back around the replacement.
+    fn core(t: &str) -> (&str, &str, &str) {
+        let lead_end = t.len() - t.trim_start_matches(|c: char| c.is_ascii_punctuation()).len();
+        let (lead, rest) = t.split_at(lead_end);
+        let trail_start = rest.trim_end_matches(|c: char| c.is_ascii_punctuation()).len();
+        let (mid, trail) = rest.split_at(trail_start);
+        (lead, mid, trail)
+    }
+
+    // Each output item remembers which source token it started at, so the
+    // separator in front of it survives even when a phrase collapses several
+    // tokens into one.
+    let mut i = 0usize;
+    let mut replaced: Vec<(usize, String)> = Vec::with_capacity(tokens.len());
+    while i < tokens.len() {
+        let mut hit = None;
+        for (mishear, correct) in &pairs {
+            let n = mishear.split_whitespace().count().max(1);
+            if i + n > tokens.len() {
+                continue;
+            }
+            let (lead, _, _) = core(tokens[i]);
+            let (_, _, trail) = core(tokens[i + n - 1]);
+            let joined: Vec<&str> = (i..i + n).map(|k| core(tokens[k]).1).collect();
+            if joined.join(" ").eq_ignore_ascii_case(mishear) {
+                hit = Some((n, format!("{}{}{}", lead, correct, trail)));
+                break;
+            }
+        }
+        match hit {
+            Some((n, text)) => {
+                replaced.push((i, text));
+                i += n;
+            }
+            None => {
+                replaced.push((i, tokens[i].to_string()));
+                i += 1;
+            }
+        }
+    }
+
+    for (src, tok) in &replaced {
+        out.push_str(seps.get(*src).copied().unwrap_or(""));
+        out.push_str(tok);
+    }
+    out.push_str(seps.get(tokens.len()).copied().unwrap_or(""));
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn apply_vocab_replaces_a_single_word_mishear() {
+        let v = vec![VocabEntry { correct: "Manvi".into(), mishears: vec!["Monvi".into()] }];
+        assert_eq!(apply_vocab("send the deck to monvi", &v), "send the deck to Manvi");
+    }
+
+    #[test]
+    fn apply_vocab_replaces_a_split_multi_word_mishear() {
+        let v = vec![VocabEntry { correct: "ChargeBee".into(), mishears: vec!["charge bee".into()] }];
+        assert_eq!(apply_vocab("we renew charge bee monthly", &v), "we renew ChargeBee monthly");
+    }
+
+    #[test]
+    fn apply_vocab_keeps_surrounding_punctuation() {
+        let v = vec![VocabEntry { correct: "Manvi".into(), mishears: vec!["Monvi".into()] }];
+        assert_eq!(apply_vocab("ask monvi, please.", &v), "ask Manvi, please.");
+    }
+
+    #[test]
+    fn apply_vocab_preserves_line_breaks_and_spacing() {
+        let v = vec![VocabEntry { correct: "Manvi".into(), mishears: vec!["Monvi".into()] }];
+        assert_eq!(apply_vocab("hi monvi\n\nbye monvi", &v), "hi Manvi\n\nbye Manvi");
+    }
+
+    #[test]
+    fn apply_vocab_does_not_touch_substrings() {
+        let v = vec![VocabEntry { correct: "ChargeBee".into(), mishears: vec!["bee".into()] }];
+        assert_eq!(apply_vocab("a beeline for the bee", &v), "a beeline for the ChargeBee");
+    }
+
+    #[test]
+    fn apply_vocab_is_case_insensitive_but_output_is_authoritative() {
+        let v = vec![VocabEntry { correct: "ChargeBee".into(), mishears: vec!["charge bee".into()] }];
+        assert_eq!(apply_vocab("Charge Bee renews", &v), "ChargeBee renews");
+    }
+
+    #[test]
+    fn apply_vocab_leaves_text_alone_with_no_vocab() {
+        assert_eq!(apply_vocab("nothing to do here", &[]), "nothing to do here");
+    }
+
+    #[test]
+    fn apply_vocab_ignores_a_mishear_equal_to_the_spelling() {
+        let v = vec![VocabEntry { correct: "Manvi".into(), mishears: vec!["manvi".into()] }];
+        assert_eq!(apply_vocab("manvi is here", &v), "manvi is here");
+    }
+
+    #[test]
+    fn apply_vocab_prefers_the_longer_phrase() {
+        let v = vec![
+            VocabEntry { correct: "ChargeBee".into(), mishears: vec!["charge bee".into()] },
+            VocabEntry { correct: "Charge".into(), mishears: vec!["charge".into()] },
+        ];
+        assert_eq!(apply_vocab("renew charge bee now", &v), "renew ChargeBee now");
+    }
+
+    #[test]
+    fn vocab_correction_no_longer_trips_the_novelty_gate() {
+        // The real regression: correcting a mishear introduces a word that was
+        // never spoken, which counted as novelty and could reject the whole edit.
+        // Applying vocab to both sides puts the spelling in raw too.
+        let v = vec![VocabEntry { correct: "Manvi".into(), mishears: vec!["Monvi".into()] }];
+        let raw = apply_vocab("send it to monvi", &v);
+        let cleaned = apply_vocab("Send it to monvi.", &v);
+        assert!(gates::evaluate(&raw, &cleaned, CleanupLevel::Light).passed());
+    }
+
     use super::*;
 
     #[test]
@@ -370,5 +594,48 @@ mod tests {
         };
         let msg = assemble_user_message("hello", &ctx);
         assert!(!msg.contains("WINDOW_CONTEXT"), "short/placeholder context is ignored");
+    }
+
+    #[test]
+    fn parse_response_pulls_the_text_out_of_a_dictate_envelope() {
+        let raw = r#"{"type": "dictate", "text_to_paste": "Book the room for Tuesday."}"#;
+        assert_eq!(
+            parse_response(raw),
+            ModelResponse::Dictate("Book the room for Tuesday.".into())
+        );
+    }
+
+    #[test]
+    fn parse_response_reads_a_command_envelope() {
+        let raw = r#"{"type": "command", "command_intent": "open_app", "command_target": "Terminal"}"#;
+        assert_eq!(
+            parse_response(raw),
+            ModelResponse::Command { intent: "open_app".into(), target: "Terminal".into() }
+        );
+    }
+
+    #[test]
+    fn parse_response_survives_a_fenced_envelope() {
+        let raw = "```json\n{\"type\": \"dictate\", \"text_to_paste\": \"Hello.\"}\n```";
+        assert_eq!(parse_response(raw), ModelResponse::Dictate("Hello.".into()));
+    }
+
+    #[test]
+    fn parse_response_treats_plain_text_as_dictation() {
+        assert_eq!(
+            parse_response("Just a sentence."),
+            ModelResponse::Dictate("Just a sentence.".into())
+        );
+    }
+
+    #[test]
+    fn a_dictate_envelope_would_fail_the_gates_but_its_text_passes() {
+        // The regression this function exists to prevent: gating the envelope
+        // instead of its payload rejected every edit and pasted raw.
+        let raw = "um so i think the the demo went well";
+        let text = "I think the demo went well.";
+        let envelope = format!(r#"{{"type": "dictate", "text_to_paste": "{text}"}}"#);
+        assert!(!evaluate_gates(raw, &envelope, CleanupLevel::Light).passed());
+        assert!(evaluate_gates(raw, text, CleanupLevel::Light).passed());
     }
 }

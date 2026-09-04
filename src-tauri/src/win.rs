@@ -176,14 +176,18 @@ fn clean_transcript(raw: &str) -> String {
         return raw.to_string();
     }
     let raw_norm = whimpr_core::cleanup::pre_normalize_layout(raw);
-    let raw_out = whimpr_core::cleanup::post_process(&raw_norm);
     let vocab = DICTIONARY
         .get()
         .map(|d| d.lock().unwrap().prefilter(&raw_norm, 15))
         .unwrap_or_default();
+    // See hotkey.rs: the dictionary has to reach the raw fallback too.
+    let raw_out = whimpr_core::cleanup::apply_vocab(
+        &whimpr_core::cleanup::post_process(&raw_norm),
+        &vocab,
+    );
     let ctx = CleanupContext {
         level,
-        vocab,
+        vocab: vocab.clone(),
         app_bundle_id: foreground_app(),
         ..Default::default()
     };
@@ -205,7 +209,21 @@ fn clean_transcript(raw: &str) -> String {
     };
     match result {
         Some(Ok(cleaned)) => {
-            let cleaned = whimpr_core::cleanup::post_process(&cleaned);
+            // See hotkey.rs: unwrap the JSON envelope before gating, or the gate
+            // compares a sentence against JSON and rejects every edit. Windows has
+            // no command dispatch (agentic_os is AppleScript), so a command
+            // envelope falls back to the raw transcript rather than pasting JSON.
+            let text = match whimpr_core::cleanup::parse_response(&cleaned) {
+                whimpr_core::cleanup::ModelResponse::Dictate(t) => t,
+                whimpr_core::cleanup::ModelResponse::Command { .. } => {
+                    eprintln!("[whimpr] commands are macOS-only — pasting raw");
+                    return raw_out;
+                }
+            };
+            let cleaned = whimpr_core::cleanup::apply_vocab(
+                &whimpr_core::cleanup::post_process(&text),
+                &vocab,
+            );
             if whimpr_core::cleanup::evaluate_gates(&raw_out, &cleaned, level).passed() {
                 cleaned
             } else {
@@ -404,7 +422,7 @@ pub fn install(app: AppHandle) {
     });
     // Start the local cleanup worker.
     std::thread::spawn(|| {
-        if let Some(w) = crate::local_llm::spawn_default() {
+        if let Some(w) = crate::local_llm::spawn_default(&crate::hotkey::current_settings().local_model) {
             if let Some(slot) = LOCAL.get() {
                 *slot.lock().unwrap() = Some(w);
             }

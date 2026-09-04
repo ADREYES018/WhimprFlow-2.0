@@ -83,10 +83,12 @@ mod imp {
     const K_CG_HEAD_INSERT: u32 = 0;
     const K_CG_TAP_OPTION_LISTEN_ONLY: u32 = 1;
     const K_CG_EVENT_FLAGS_CHANGED: u32 = 12;
-    const EVENTS_OF_INTEREST: u64 = 1 << K_CG_EVENT_FLAGS_CHANGED;
+    const K_CG_EVENT_KEY_DOWN: u32 = 10;
+    const K_CG_EVENT_KEY_UP: u32 = 11;
+    const EVENTS_OF_INTEREST: u64 = (1 << K_CG_EVENT_FLAGS_CHANGED) | (1 << K_CG_EVENT_KEY_DOWN) | (1 << K_CG_EVENT_KEY_UP);
+    const FLAG_OPTION: u64 = 0x0008_0000;
     const FLAG_SECONDARY_FN: u64 = 0x0080_0000;
     const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
-    const KEYCODE_FN: i64 = 63;
     const K_CG_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
     const K_CG_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
@@ -94,6 +96,10 @@ mod imp {
     static MACHINE: OnceLock<Mutex<StateMachine>> = OnceLock::new();
     static CLOCK: OnceLock<Instant> = OnceLock::new();
     static FN_IS_DOWN: AtomicBool = AtomicBool::new(false);
+    static TRIGGER_MODIFIERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x0008_0000);
+    static TRIGGER_KEYCODE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(49);
+    static TRIGGER_MODE_IS_TOGGLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static TOGGLE_STATE_IS_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static TAP_PORT: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
     /// Set once at startup if no Whisper model file exists on disk at all —
     /// distinct from "still loading", so the finalize path only shows the
@@ -282,7 +288,28 @@ mod imp {
             .unwrap_or_default()
     }
     /// Apply new settings and rebuild the cloud providers (picks up model changes).
+
+    fn parse_hotkey(key: &str) -> (u64, i64) {
+        let mut mods = 0;
+        if key.contains("Option") || key.contains("Alt") { mods |= FLAG_OPTION; }
+        if key.contains("Command") || key.contains("Cmd") || key.contains("Meta") { mods |= 0x0010_0000; }
+        if key.contains("Control") || key.contains("Ctrl") { mods |= 0x0004_0000; }
+        if key.contains("Shift") { mods |= 0x0002_0000; }
+        if key.contains("Fn") { mods |= FLAG_SECONDARY_FN; }
+
+        let code = if key.contains("Space") { 49 }
+            else if key.contains("Fn") && mods == FLAG_SECONDARY_FN { 63 }
+            else if key.contains("Enter") { 36 }
+            else { 49 }; // basic fallback
+        (mods, code)
+    }
+
     pub fn update_settings(new: whimpr_core::Settings) {
+        let (m, c) = parse_hotkey(&new.trigger_key);
+        TRIGGER_MODIFIERS.store(m, Ordering::SeqCst);
+        TRIGGER_KEYCODE.store(c, Ordering::SeqCst);
+        TRIGGER_MODE_IS_TOGGLE.store(new.trigger_mode == "toggle", Ordering::SeqCst);
+
         if let Some(m) = SETTINGS.get() {
             *m.lock().unwrap() = new.clone();
         }
@@ -338,18 +365,26 @@ mod imp {
         // never paste a "[[NL]]" token or lose an explicit break.
         let raw_norm = whimpr_core::cleanup::pre_normalize_layout(raw);
         let raw = raw_norm.as_str();
-        let raw_out = whimpr_core::cleanup::post_process(&raw_norm);
         let vocab = DICTIONARY
             .get()
             .map(|d| d.lock().unwrap().prefilter(raw, 15))
             .unwrap_or_default();
+        // Apply the dictionary to the raw fallback as well. Every path below can
+        // paste `raw_out` — cleanup off, no API key, model not loaded, provider
+        // error, gate rejection — and before this the dictionary was silently
+        // dropped on all of them. Correcting both sides also keeps a legitimate
+        // spelling fix from counting as novelty and tripping the gate.
+        let raw_out = whimpr_core::cleanup::apply_vocab(
+            &whimpr_core::cleanup::post_process(&raw_norm),
+            &vocab,
+        );
         let app_bundle_id = TARGET_APP.get().and_then(|m| m.lock().unwrap().clone());
         if let Some(app) = app_bundle_id.as_deref() {
             eprintln!("[whimpr] cleanup target app: {app}");
         }
         let ctx = CleanupContext {
             level,
-            vocab,
+            vocab: vocab.clone(),
             app_bundle_id,
             active_app_name: active_app,
             active_window_title: active_window,
@@ -367,31 +402,54 @@ mod imp {
                 })
             })
         };
-        // Selected provider, falling back to local when a cloud key can't be read
-        // (so cleanup still runs) — and Local mode uses the worker directly.
+        // Selected provider, falling back to local when a cloud key is missing or when the API errors
+        let try_cloud_with_local_fallback = |cloud_opt: Option<anyhow::Result<String>>| -> Option<anyhow::Result<String>> {
+            match cloud_opt {
+                Some(Ok(text)) => Some(Ok(text)),
+                Some(Err(e)) => {
+                    eprintln!("[whimpr] cloud cleanup error ({e}), falling back to local model");
+                    run_local()
+                }
+                None => run_local(),
+            }
+        };
+
         let result: Option<anyhow::Result<String>> = match settings.cleanup_mode {
-            CleanupMode::OpenAi => OPENAI
-                .get()
-                .and_then(|m| m.lock().unwrap().as_ref().map(|p| p.cleanup(raw, &ctx)))
-                .or_else(run_local),
-            CleanupMode::Anthropic => ANTHROPIC
-                .get()
-                .and_then(|m| m.lock().unwrap().as_ref().map(|p| p.cleanup(raw, &ctx)))
-                .or_else(run_local),
+            CleanupMode::OpenAi => try_cloud_with_local_fallback(
+                OPENAI.get().and_then(|m| m.lock().unwrap().as_ref().map(|p| p.cleanup(raw, &ctx)))
+            ),
+            CleanupMode::Anthropic => try_cloud_with_local_fallback(
+                ANTHROPIC.get().and_then(|m| m.lock().unwrap().as_ref().map(|p| p.cleanup(raw, &ctx)))
+            ),
             CleanupMode::Local => run_local(),
             CleanupMode::Raw => None,
         };
         match result {
             Some(Ok(cleaned)) => {
-                // Deterministic safety net: convert any leftover spoken layout cue the
-                // model missed into real line breaks, strip stray code fences, cap blank
-                // lines. Guarantees no "new line"/"new paragraph" word reaches the cursor.
-                let cleaned = whimpr_core::cleanup::post_process(&cleaned);
-                if whimpr_core::cleanup::evaluate_gates(&raw_out, &cleaned, level).passed() {
-                    cleaned
-                } else {
-                    eprintln!("[whimpr] cleanup gate rejected the edit — pasting raw");
-                    raw_out
+                // Every response is a JSON envelope now, dictation included. Unwrap it
+                // BEFORE post-processing and gating: gating the envelope compares a
+                // sentence against JSON braces, which always diverges far enough to be
+                // rejected, so cleanup silently never applied.
+                match whimpr_core::cleanup::parse_response(&cleaned) {
+                    // A command is dispatched by the caller, never pasted, so it skips
+                    // the gates entirely. Hand the envelope back untouched.
+                    whimpr_core::cleanup::ModelResponse::Command { .. } => cleaned,
+                    whimpr_core::cleanup::ModelResponse::Dictate(text) => {
+                        // Deterministic safety net: convert any leftover spoken layout cue
+                        // the model missed into real line breaks, strip stray code fences,
+                        // cap blank lines. Guarantees no "new line"/"new paragraph" word
+                        // reaches the cursor.
+                        let text = whimpr_core::cleanup::apply_vocab(
+                            &whimpr_core::cleanup::post_process(&text),
+                            &vocab,
+                        );
+                        if whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level).passed() {
+                            text
+                        } else {
+                            eprintln!("[whimpr] cleanup gate rejected the edit — pasting raw");
+                            raw_out
+                        }
+                    }
                 }
             }
             Some(Err(e)) => {
@@ -427,6 +485,9 @@ mod imp {
 
     fn emit_bar(app: &AppHandle, state: &'static str) {
         eprintln!("[whimpr] pill -> {state}");
+        if matches!(state, "idle" | "done" | "cancelled" | "error") {
+            TOGGLE_STATE_IS_RECORDING.store(false, Ordering::SeqCst);
+        }
         let _ = app.emit_to(OVERLAY_LABEL, "whimpr://flowbar/state", BarPayload { state });
     }
 
@@ -538,11 +599,49 @@ mod imp {
                             eprintln!("[whimpr] Context -> app: {}, window: {}", active_app, active_window);
 
                             // The LLM now returns JSON
-                            let json_text = clean_transcript(
-                                &raw, 
-                                if active_app.is_empty() { None } else { Some(active_app) }, 
-                                if active_window.is_empty() { None } else { Some(active_window) }
-                            );
+                            let raw_lower = raw.to_lowercase().replace(&[',', '.', '!', '?'][..], "");
+                            let json_text = if raw_lower.trim().starts_with("hey shrimp") {
+                                let mut intent = "start_recording";
+                                let mut target = "";
+                                if raw_lower.contains("terminal") {
+                                    intent = "open_app";
+                                    target = "Terminal";
+                                } else if raw_lower.contains("oatmeal") {
+                                    intent = "start_recording";
+                                } else if raw_lower.contains("safari") {
+                                    intent = "open_app";
+                                    target = "Safari";
+                                } else if raw_lower.contains("notes") {
+                                    intent = "open_app";
+                                    target = "Notes";
+                                } else {
+                                    // if it's an app we don't hardcode, try dynamically extracting it if it's "open X"
+                                    if raw_lower.contains("open ") {
+                                        let parts: Vec<&str> = raw_lower.splitn(2, "open ").collect();
+                                        if parts.len() == 2 {
+                                            intent = "open_app";
+                                            // Capitalize the target
+                                            target = parts[1];
+                                        }
+                                    }
+                                }
+                                // Dynamically capitalizing target
+                                let mut final_target = target.to_string();
+                                if intent == "open_app" && !target.is_empty() {
+                                    let mut chars = target.chars();
+                                    if let Some(first) = chars.next() {
+                                        final_target = format!("{}{}", first.to_uppercase(), chars.as_str());
+                                    }
+                                }
+                                
+                                format!(r#"{{"type":"command", "command_intent":"{}", "command_target":"{}"}}"#, intent, final_target)
+                            } else {
+                                clean_transcript(
+                                    &raw, 
+                                    if active_app.is_empty() { None } else { Some(active_app.clone()) }, 
+                                    if active_window.is_empty() { None } else { Some(active_window) }
+                                )
+                            };
                             
                             // Parse Agentic OS JSON
                             #[derive(serde::Deserialize)]
@@ -633,7 +732,16 @@ mod imp {
             }
             // The ASR path (StopCaptureAndFinalize) now drives pipeline completion.
             Action::RunPipeline { .. } => {}
-            // PlayPing / WarnSessionCap: no-ops for now.
+            Action::PlayPing => {
+                let sound_on = SETTINGS.get().map(|m| m.lock().unwrap().sound_on_start).unwrap_or(true);
+                if sound_on {
+                    std::thread::spawn(|| {
+                        let _ = std::process::Command::new("afplay")
+                            .arg("/System/Library/Sounds/Pop.aiff")
+                            .output();
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -651,30 +759,74 @@ mod imp {
             }
             return event;
         }
-        if etype == K_CG_EVENT_FLAGS_CHANGED {
+        if etype == K_CG_EVENT_KEY_DOWN || etype == K_CG_EVENT_KEY_UP {
             let keycode =
                 unsafe { CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE) };
-            if keycode == KEYCODE_FN {
-                let flags = unsafe { CGEventGetFlags(event) };
-                let down = (flags & FLAG_SECONDARY_FN) != 0;
-                let was_down = FN_IS_DOWN.swap(down, Ordering::SeqCst);
-                let at_ms = now_ms();
-                if down && !was_down {
-                    eprintln!("[whimpr] Fn DOWN");
-                    // Snapshot the paste target now, while the user's app is focused.
-                    let target = crate::appctx::frontmost_bundle_id();
-                    *TARGET_APP.get_or_init(|| Mutex::new(None)).lock().unwrap() = target;
-                    handle_input(Input::Trigger(TriggerToken::Down {
-                        binding: BindingId::PushToTalk,
-                        at_ms,
-                    }));
-                } else if !down && was_down {
-                    eprintln!("[whimpr] Fn UP");
-                    handle_input(Input::Trigger(TriggerToken::Up {
-                        binding: BindingId::PushToTalk,
-                        at_ms,
-                    }));
+            let expected_mod = TRIGGER_MODIFIERS.load(Ordering::SeqCst);
+            let expected_code = TRIGGER_KEYCODE.load(Ordering::SeqCst);
+            
+            // Allow triggering down if target modifier matches.
+            // But wait, the macro might be `Fn` which only sends flag changed event!
+            let is_fn_driven = expected_code == 63;
+            if is_fn_driven {
+                if etype == K_CG_EVENT_FLAGS_CHANGED && keycode == 63 {
+                    let flags = unsafe { CGEventGetFlags(event) };
+                    let down = (flags & expected_mod) != 0;
+                    let was_down = FN_IS_DOWN.swap(down, Ordering::SeqCst);
+                    let at_ms = now_ms();
+                    if down && !was_down {
+                        let target = crate::appctx::frontmost_bundle_id();
+                        *TARGET_APP.get_or_init(|| Mutex::new(None)).lock().unwrap() = target;
+                        if TRIGGER_MODE_IS_TOGGLE.load(Ordering::SeqCst) {
+                            let is_rec = TOGGLE_STATE_IS_RECORDING.load(Ordering::SeqCst);
+                            if !is_rec {
+                                TOGGLE_STATE_IS_RECORDING.store(true, Ordering::SeqCst);
+                                handle_input(Input::Trigger(TriggerToken::Down { binding: BindingId::PushToTalk, at_ms }));
+                            } else {
+                                TOGGLE_STATE_IS_RECORDING.store(false, Ordering::SeqCst);
+                                handle_input(Input::Trigger(TriggerToken::Up { binding: BindingId::PushToTalk, at_ms }));
+                            }
+                        } else {
+                            handle_input(Input::Trigger(TriggerToken::Down { binding: BindingId::PushToTalk, at_ms }));
+                        }
+                    } else if !down && was_down {
+                        if !TRIGGER_MODE_IS_TOGGLE.load(Ordering::SeqCst) {
+                            handle_input(Input::Trigger(TriggerToken::Up { binding: BindingId::PushToTalk, at_ms }));
+                        }
+                    }
                 }
+            } else {
+                if keycode == expected_code {
+                    let flags = unsafe { CGEventGetFlags(event) };
+                    let down = etype == K_CG_EVENT_KEY_DOWN;
+                    
+                    if (!down) || ((flags & expected_mod) == expected_mod) {
+                    let was_down = FN_IS_DOWN.swap(down, Ordering::SeqCst);
+                    let at_ms = now_ms();
+                    if down && !was_down {
+                        eprintln!("[whimpr] Option+Space DOWN");
+                        let target = crate::appctx::frontmost_bundle_id();
+                        *TARGET_APP.get_or_init(|| Mutex::new(None)).lock().unwrap() = target;
+                        if TRIGGER_MODE_IS_TOGGLE.load(Ordering::SeqCst) {
+                            let is_rec = TOGGLE_STATE_IS_RECORDING.load(Ordering::SeqCst);
+                            if !is_rec {
+                                TOGGLE_STATE_IS_RECORDING.store(true, Ordering::SeqCst);
+                                handle_input(Input::Trigger(TriggerToken::Down { binding: BindingId::PushToTalk, at_ms }));
+                            } else {
+                                TOGGLE_STATE_IS_RECORDING.store(false, Ordering::SeqCst);
+                                handle_input(Input::Trigger(TriggerToken::Up { binding: BindingId::PushToTalk, at_ms }));
+                            }
+                        } else {
+                            handle_input(Input::Trigger(TriggerToken::Down { binding: BindingId::PushToTalk, at_ms }));
+                        }
+                    } else if !down && was_down {
+                        eprintln!("[whimpr] Option+Space UP");
+                        if !TRIGGER_MODE_IS_TOGGLE.load(Ordering::SeqCst) {
+                            handle_input(Input::Trigger(TriggerToken::Up { binding: BindingId::PushToTalk, at_ms }));
+                        }
+                    }
+                }
+            }
             }
         }
         event
@@ -684,6 +836,13 @@ mod imp {
         let _ = APP.set(app);
         let _ = MACHINE.set(Mutex::new(StateMachine::new()));
         let _ = CLOCK.set(Instant::now());
+        let settings = whimpr_core::Settings::load(&settings_path());
+        {
+            let (m, c) = parse_hotkey(&settings.trigger_key);
+            TRIGGER_MODIFIERS.store(m, std::sync::atomic::Ordering::SeqCst);
+            TRIGGER_KEYCODE.store(c, std::sync::atomic::Ordering::SeqCst);
+            TRIGGER_MODE_IS_TOGGLE.store(settings.trigger_mode == "toggle", std::sync::atomic::Ordering::SeqCst);
+        }
 
         // Load the speech-to-text model off the main thread (it takes ~1s).
         std::thread::spawn(|| {
@@ -720,7 +879,7 @@ mod imp {
         // Start the local cleanup worker in the background (model load takes a few
         // seconds; the first local cleanup waits for it, subsequent ones are fast).
         std::thread::spawn(|| {
-            let worker = crate::local_llm::spawn_default();
+            let worker = crate::local_llm::spawn_default(&SETTINGS.get().unwrap().lock().unwrap().local_model);
             let _ = LOCAL.set(Mutex::new(worker));
         });
 

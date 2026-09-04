@@ -1800,17 +1800,32 @@ In `src-tauri/src/hotkey.rs`, delete the block from `let raw_lower = raw.to_lowe
                                 whimpr_core::Route::Transform { id, body, source } => {
                                     run_transform(&id, &body, source, &transforms_snapshot)
                                 }
+                                // `clean_transcript` returns plain text for dictation: it
+                                // unwraps the model's JSON envelope internally (see
+                                // `cleanup::parse_response`). If the model answers a
+                                // dictation with a command envelope anyway, that function
+                                // hands the envelope back, so guard against pasting it.
                                 whimpr_core::Route::Dictate => {
                                     let cleaned = clean_transcript(
                                         &raw,
                                         if active_app.is_empty() { None } else { Some(active_app.clone()) },
                                         if active_window.is_empty() { None } else { Some(active_window) },
                                     );
-                                    whimpr_core::router::finalize_dictation(
-                                        &cleaned,
-                                        &settings,
-                                        &snippets_snapshot,
-                                    )
+                                    // A command envelope on the dictate path means the
+                                    // model ignored the route. Paste the raw transcript
+                                    // rather than a blob of JSON.
+                                    if matches!(
+                                        whimpr_core::cleanup::parse_response(&cleaned),
+                                        whimpr_core::cleanup::ModelResponse::Command { .. }
+                                    ) {
+                                        raw.clone()
+                                    } else {
+                                        whimpr_core::router::finalize_dictation(
+                                            &cleaned,
+                                            &settings,
+                                            &snippets_snapshot,
+                                        )
+                                    }
                                 }
                             };
 ```
