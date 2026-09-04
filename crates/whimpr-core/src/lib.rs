@@ -14,6 +14,7 @@ pub mod cleanup;
 pub mod diagnostics;
 pub mod dictionary;
 pub mod settings;
+pub mod snippets;
 pub mod state;
 pub mod stats;
 pub mod types;
@@ -23,6 +24,7 @@ pub use cleanup::{CleanupContext, CleanupLevel, CleanupProvider, ProviderId, Voc
 pub use diagnostics::{Diagnostic, InjectionFailure, Platform};
 pub use dictionary::{DictSource, DictionaryEntry, DictionaryStore};
 pub use settings::{CleanupMode, Settings};
+pub use snippets::{Snippet, SnippetStore};
 pub use stats::{HistoryItem, SessionRecord, StatsStore, StatsSummary};
 pub use state::{Action, BarState, DictationState, Input, PipelineEvent, StateMachine, TriggerToken};
 pub use types::{RecordMode, SessionId};
