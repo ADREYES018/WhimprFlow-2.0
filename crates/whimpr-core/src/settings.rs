@@ -26,6 +26,9 @@ fn default_trigger_key() -> String { "Option + Space".to_string() }
 fn default_trigger_mode() -> String { "hold".to_string() }
 fn default_whisper_model() -> String { "auto".to_string() }
 fn default_local_model() -> String { "auto".to_string() }
+fn default_wake_word() -> String { "hey shrimp".to_string() }
+fn default_true() -> bool { true }
+fn default_command_provider() -> String { "auto".to_string() }
 
 /// Persisted user configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +54,22 @@ pub struct Settings {
     pub whisper_model: String,
     #[serde(default = "default_local_model")]
     pub local_model: String,
+    /// Spoken prefix that turns an utterance into a command instead of dictation.
+    #[serde(default = "default_wake_word")]
+    pub wake_word: String,
+    /// When false, no utterance is ever treated as a command.
+    #[serde(default = "default_true")]
+    pub wake_word_enabled: bool,
+    /// How unmatched commands are classified: "auto" | "cloud" | "local" | "rules".
+    /// "rules" skips the LLM layer entirely.
+    #[serde(default = "default_command_provider")]
+    pub command_provider: String,
+    /// Inject the user's style profile into the cleanup prompt.
+    #[serde(default)]
+    pub style_enabled: bool,
+    /// Expand snippet triggers after cleanup.
+    #[serde(default = "default_true")]
+    pub snippets_enabled: bool,
 }
 
 impl Default for Settings {
@@ -66,6 +85,11 @@ impl Default for Settings {
             trigger_mode: default_trigger_mode(),
             whisper_model: default_whisper_model(),
             local_model: default_local_model(),
+            wake_word: default_wake_word(),
+            wake_word_enabled: true,
+            command_provider: default_command_provider(),
+            style_enabled: false,
+            snippets_enabled: true,
         }
     }
 }
@@ -106,5 +130,29 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.cleanup_mode, CleanupMode::Local);
+    }
+
+    #[test]
+    fn new_fields_have_defaults() {
+        let s = Settings::default();
+        assert_eq!(s.wake_word, "hey shrimp");
+        assert!(s.wake_word_enabled);
+        assert_eq!(s.command_provider, "auto");
+        assert!(!s.style_enabled);
+        assert!(s.snippets_enabled);
+    }
+
+    #[test]
+    fn loads_a_settings_file_written_before_these_fields_existed() {
+        let old = r#"{
+            "cleanup_mode": "local",
+            "cleanup_level": "light",
+            "openai_model": "gpt-4o-mini",
+            "anthropic_model": "claude-haiku-4-5",
+            "sound_on_start": true
+        }"#;
+        let s: Settings = serde_json::from_str(old).expect("old settings must still parse");
+        assert_eq!(s.wake_word, "hey shrimp");
+        assert!(s.snippets_enabled);
     }
 }
