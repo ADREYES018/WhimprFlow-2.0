@@ -14,6 +14,7 @@ pub mod cleanup;
 pub mod diagnostics;
 pub mod dictionary;
 pub mod gpu_gate;
+pub mod local_llm;
 pub mod router;
 pub mod scratchpad;
 pub mod settings;

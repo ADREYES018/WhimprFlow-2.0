@@ -59,6 +59,12 @@ pub struct GpuGate {
     cv: Arc<Condvar>,
 }
 
+static GLOBAL_GPU_GATE: std::sync::OnceLock<GpuGate> = std::sync::OnceLock::new();
+
+pub fn global_gpu_gate() -> &'static GpuGate {
+    GLOBAL_GPU_GATE.get_or_init(|| GpuGate::with_min_interval(MIN_INTERVAL))
+}
+
 pub struct GpuGuard {
     gate: GpuGate,
 }

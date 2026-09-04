@@ -62,6 +62,10 @@ fn app_support_dir() -> PathBuf {
     }
 }
 
+pub fn support_root() -> PathBuf {
+    app_support_dir()
+}
+
 pub fn model_dir() -> PathBuf {
     app_support_dir().join("models")
 }
