@@ -47,19 +47,19 @@ impl LocalWorker {
         }
         Ok(v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
     }
-    pub fn complete_streaming(
+    /// Stream one request (system + user turns) and return the final text.
+    /// Chunks are handed to `sink` as they arrive.
+    pub fn stream_messages(
         &mut self,
-        prompt: &str,
+        messages: &[whimpr_core::cleanup::CleanupMsg],
         mut sink: impl FnMut(&str),
     ) -> anyhow::Result<String> {
-        let msgs = vec![whimpr_core::cleanup::CleanupMsg { role: "user", content: prompt.to_string() }];
-        let req = serde_json::json!({ "messages": msgs, "max_tokens": 400, "stream": true });
+        let req = serde_json::json!({ "messages": messages, "max_tokens": 400, "stream": true });
         let mut line = serde_json::to_string(&req)?;
         line.push('\n');
         self.stdin.write_all(line.as_bytes())?;
         self.stdin.flush()?;
 
-        let mut final_text = String::new();
         loop {
             let mut resp = String::new();
             if self.stdout.read_line(&mut resp)? == 0 {
@@ -73,11 +73,9 @@ impl LocalWorker {
                 sink(chunk);
             }
             if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                final_text = text.to_string();
-                break;
+                return Ok(text.to_string());
             }
         }
-        Ok(final_text)
     }
 }
 
@@ -191,9 +189,50 @@ pub fn complete(prompt: &str) -> anyhow::Result<String> {
     worker.cleanup(&msgs)
 }
 
-pub fn complete_streaming(prompt: &str, sink: impl FnMut(&str)) -> anyhow::Result<String> {
-    let worker_lock = crate::hotkey::local_worker();
-    let mut guard = worker_lock.lock().unwrap();
-    let worker = guard.as_mut().ok_or_else(|| anyhow::anyhow!("local LLM not available"))?;
-    worker.complete_streaming(prompt, sink)
+/// Build the message list for a system+user request. An empty system prompt is
+/// dropped rather than sent as a blank turn.
+fn pair_messages(system: &str, user: &str) -> Vec<whimpr_core::cleanup::CleanupMsg> {
+    let mut msgs = Vec::with_capacity(2);
+    if !system.trim().is_empty() {
+        msgs.push(whimpr_core::cleanup::CleanupMsg {
+            role: "system",
+            content: system.to_string(),
+        });
+    }
+    msgs.push(whimpr_core::cleanup::CleanupMsg {
+        role: "user",
+        content: user.to_string(),
+    });
+    msgs
+}
+
+/// Wire this crate's worker in as the process-wide provider behind
+/// `whimpr_core::local_llm`. Without this, notes/recall/study calls fall through
+/// to the "not attached" error instead of reaching llama.
+pub fn register_providers() {
+    whimpr_core::local_llm::set_complete_provider(|system, user| {
+        let msgs = pair_messages(system, user);
+        let worker_lock = crate::hotkey::local_worker();
+        let mut guard = worker_lock
+            .lock()
+            .map_err(|_| "local LLM worker lock poisoned".to_string())?;
+        let worker = guard
+            .as_mut()
+            .ok_or_else(|| "local LLM not available".to_string())?;
+        worker.cleanup(&msgs).map_err(|e| e.to_string())
+    });
+
+    whimpr_core::local_llm::set_stream_provider(|system, user, on_token| {
+        let msgs = pair_messages(system, user);
+        let worker_lock = crate::hotkey::local_worker();
+        let mut guard = worker_lock
+            .lock()
+            .map_err(|_| "local LLM worker lock poisoned".to_string())?;
+        let worker = guard
+            .as_mut()
+            .ok_or_else(|| "local LLM not available".to_string())?;
+        worker
+            .stream_messages(&msgs, |chunk| on_token(chunk))
+            .map_err(|e| e.to_string())
+    });
 }

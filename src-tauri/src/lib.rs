@@ -1035,8 +1035,13 @@ pub fn run() {
             let _ = hub.show();
             let _ = hub.set_focus();
 
-            // Wire the Fn key to the pill via the real state machine.
+            // Wire the Fn key to the pill via the real state machine. This also
+            // starts the local LLM worker in the background.
             hotkey::install(app.handle().clone());
+
+            // Point whimpr_core::local_llm at that worker, so notes, recall and
+            // study generation reach llama instead of erroring out.
+            local_llm::register_providers();
 
             let open = MenuItem::with_id(app, "open", "Open WhimprFlow", true, None::<&str>)?;
             let demo_rec =

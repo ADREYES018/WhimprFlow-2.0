@@ -65,20 +65,50 @@ mod tests {
         assert!(from_speech(&long).is_err());
     }
 
+    // The LLM provider is a process-wide static, so tests that install one must
+    // not interleave.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Stand in for the worker: echo the tokens back one word at a time so the
+    /// test exercises the real streaming path instead of a fallback.
+    fn install_fake_provider() {
+        whimpr_core::local_llm::set_stream_provider(|system, user, on_token| {
+            assert_eq!(system, MATH_SYSTEM, "the math system prompt must be sent");
+            for word in user.split_whitespace() {
+                on_token(word);
+            }
+            Ok(format!("\\({user}\\)"))
+        });
+    }
+
     #[test]
     fn converts_speech_to_latex() {
+        let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        install_fake_provider();
         let res = from_speech("integral of x squared dx").unwrap();
-        assert!(!res.is_empty());
+        assert_eq!(res, "\\(integral of x squared dx\\)");
     }
 
     #[test]
     fn streams_tokens_during_conversion() {
+        let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        install_fake_provider();
         let mut tokens = Vec::new();
         let res = from_speech_streaming("x plus y equals z", &mut |t| {
             tokens.push(t.to_string());
         })
         .unwrap();
-        assert!(!tokens.is_empty());
-        assert!(!res.is_empty());
+        assert_eq!(tokens, vec!["x", "plus", "y", "equals", "z"]);
+        assert_eq!(res, "\\(x plus y equals z\\)");
+    }
+
+    #[test]
+    fn conversion_surfaces_the_error_when_no_llm_is_attached() {
+        let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        // No provider installed for this one: the call must fail rather than
+        // hand back a plausible-looking placeholder.
+        whimpr_core::local_llm::clear_providers_for_tests();
+        let err = from_speech("two plus two").unwrap_err();
+        assert!(err.contains("not attached"), "got {err}");
     }
 }
