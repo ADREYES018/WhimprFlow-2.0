@@ -161,14 +161,14 @@ export function FlowBar() {
   // headline (e.g. "Accessibility permission needed") isn't clipped —
   // truncating it back down to "Something's off" would defeat the point.
   const dims = isIdle
-    ? { w: 76, h: 16 }
+    ? { w: 40, h: 12 }
     : recording
-      ? { w: 250, h: 44 }
+      ? { w: 160, h: 32 }
       : isError
-        ? { w: 280, h: 36 }
+        ? { w: 240, h: 32 }
         : isCommand
-        ? { w: 220, h: 36 }
-        : { w: 180, h: 36 };
+        ? { w: 170, h: 32 }
+        : { w: 120, h: 32 };
 
   return (
     <div
@@ -189,10 +189,11 @@ export function FlowBar() {
           display: "flex",
           alignItems: "center",
           justifyContent: recording ? "space-between" : "center",
-          gap: 10,
+          gap: 6,
           height: dims.h,
           width: dims.w,
-          padding: recording ? "0 8px" : 0,
+          opacity: isIdle ? 0 : 1, /* Hides completely when idle! */
+          padding: recording ? "0 6px" : 0,
           background: isCommand ? (palette as any).accentDeep || "#0e877c" : pillFill.base,
           border: `1px solid rgba(255,255,255,0.10)`,
           borderRadius: 9999,

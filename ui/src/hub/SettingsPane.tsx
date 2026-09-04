@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { font } from "../tokens/values";
 import { theme } from "./theme";
 import { Button, Card, Dot, PageTitle, Segmented } from "./ui";
@@ -120,6 +120,43 @@ function PermRow({
   );
 }
 
+
+function HotkeyRecorder({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+  const [recording, setRecording] = useState(false);
+
+  return (
+    <input
+      type="text"
+      readOnly
+      value={recording ? "Recording... (Press keys)" : value || ""}
+      onFocus={() => setRecording(true)}
+      onBlur={() => setRecording(false)}
+      onKeyDown={(e) => {
+        e.preventDefault();
+        const mods = [];
+        if (e.ctrlKey) mods.push("Control");
+        if (e.altKey) mods.push("Option");
+        if (e.metaKey) mods.push("Command");
+        if (e.shiftKey) mods.push("Shift");
+        
+        let key = e.code;
+        if (key.startsWith("Key")) key = key.replace("Key", "");
+        if (key === "AltLeft" || key === "AltRight" || key === "MetaLeft" || key === "MetaRight" || key === "ControlLeft" || key === "ControlRight" || key === "ShiftLeft" || key === "ShiftRight") {
+           onChange(mods.join(" + "));
+           return;
+        }
+
+        const full = mods.length ? mods.join(" + ") + " + " + key : key;
+        onChange(full);
+        setRecording(false);
+        e.currentTarget.blur();
+      }}
+      placeholder="Click to record hotkey"
+      style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: recording ? theme.accentSoft : theme.cardBgSubtle, border: recording ? `1px solid ${theme.accent}` : `1px solid ${theme.border}`, color: theme.textBody, outline: "none", cursor: "pointer" }}
+    />
+  );
+}
+
 export function SettingsPane({
   settings,
   onChange,
@@ -131,28 +168,52 @@ export function SettingsPane({
   status: Status;
   refresh: () => void;
 }) {
+  const [modelOptions, setModelOptions] = useState<string[]>(["auto"]);
+  useEffect(() => {
+    import("./api").then(api => api.listModels().then(m => setModelOptions(m)));
+  }, []);
+
   return (
     <div style={{ maxWidth: 720 }}>
       <PageTitle>Settings</PageTitle>
 
       <Card style={{ marginBottom: 16 }}>
-        <SectionTitle sub="Recording Hotkey">Trigger Key</SectionTitle>
-        <input
-          type="text"
-          value={settings.trigger_key}
-          onChange={(e) => onChange({ ...settings, trigger_key: e.target.value })}
-          placeholder="e.g. Fn, Left Control"
-          style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: theme.cardBgSubtle, border: `1px solid ${theme.border}`, color: theme.textBody, outline: "none" }}
-        />
+        <SectionTitle sub="Recording Hotkey">Custom Button Key</SectionTitle>
+        <HotkeyRecorder value={settings.trigger_key} onChange={(v) => onChange({...settings, trigger_key: v})} />
         <div style={{ marginTop: 16 }}>
-          <SectionTitle sub="Which local speech model to load from your models folder. 'auto' picks the best available.">Whisper Model</SectionTitle>
-          <input
-            type="text"
+          <SectionTitle sub="Recording mode. Hold (Push-to-Talk) or Press once to Start/Stop (Toggle).">Trigger Mode</SectionTitle>
+          <Segmented
+            options={[
+              { value: "hold", label: "Hold" },
+              { value: "toggle", label: "Toggle (Press once)" },
+            ]}
+            value={settings.trigger_mode || "hold"}
+            onChange={(v) => onChange({ ...settings, trigger_mode: v as "hold" | "toggle" })}
+          />
+        </div>
+        <div style={{ marginTop: 16 }}>
+                    <SectionTitle sub="Which local speech model to load from your models folder. 'auto' picks the best available.">Whisper Model</SectionTitle>
+          <select
             value={settings.whisper_model}
             onChange={(e) => onChange({ ...settings, whisper_model: e.target.value })}
-            placeholder="auto or e.g. ggml-small.en.bin"
-            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: theme.cardBgSubtle, border: `1px solid ${theme.border}`, color: theme.textBody, outline: "none" }}
-          />
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: theme.cardBgSubtle, border: `1px solid ${theme.border}`, color: theme.textBody, outline: "none", appearance: "none" }}
+          >
+            {modelOptions.filter(m => m === "auto" || m.endsWith(".bin")).map(m => (
+              <option key={"w_"+m} value={m}>{m === "auto" ? "auto (best local model)" : m}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <SectionTitle sub="Which local AI cleanup model to load from your models folder. 'auto' picks the best available.">Local LLM Model</SectionTitle>
+          <select
+            value={settings.local_model || "auto"}
+            onChange={(e) => onChange({ ...settings, local_model: e.target.value })}
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, background: theme.cardBgSubtle, border: `1px solid ${theme.border}`, color: theme.textBody, outline: "none", appearance: "none" }}
+          >
+            {modelOptions.filter(m => m === "auto" || m.endsWith(".gguf")).map(m => (
+              <option key={"l_"+m} value={m}>{m === "auto" ? "auto (best local model)" : m}</option>
+            ))}
+          </select>
         </div>
       </Card>
 
