@@ -97,9 +97,26 @@ impl DictionaryStore {
             .filter(|t| !t.is_empty())
             .collect();
 
+        // Multi-word mishears need a window as wide as the longest one on file.
+        // Fixed unigrams+bigrams silently hid every 3+ word entry, so a mishear
+        // like "agent at the" could sit in the dictionary and never once match.
+        let widest = self
+            .entries
+            .iter()
+            .flat_map(|e| e.mishears.iter())
+            .map(|m| m.split_whitespace().count())
+            .max()
+            .unwrap_or(1)
+            .clamp(1, 5);
+
         let mut grams: Vec<String> = toks.clone();
-        for w in toks.windows(2) {
-            grams.push(format!("{}{}", w[0], w[1]));
+        for n in 2..=widest {
+            for w in toks.windows(n) {
+                // Both joinings: "chargebee" catches a split word, "charge bee"
+                // catches a mishear stored with its spaces.
+                grams.push(w.concat());
+                grams.push(w.join(" "));
+            }
         }
 
         let mut out = Vec::new();
@@ -157,6 +174,22 @@ mod tests {
         // "charge bee" spoken as two words → bigram "chargebee" matches.
         let v = store().prefilter("we should renew charge bee this month", 15);
         assert!(v.iter().any(|e| e.correct == "ChargeBee"));
+    }
+
+    #[test]
+    fn prefilter_finds_a_three_word_mishear_inside_a_sentence() {
+        let mut s = DictionaryStore::default();
+        s.add("agenetic", vec!["agent at the".into()], DictSource::Manual);
+        let v = s.prefilter("open the agent at the os please", 15);
+        assert!(v.iter().any(|e| e.correct == "agenetic"));
+    }
+
+    #[test]
+    fn prefilter_finds_a_spaced_mishear_inside_a_sentence() {
+        let mut s = DictionaryStore::default();
+        s.add("agenetic os", vec!["Agent ethical s".into()], DictSource::Manual);
+        let v = s.prefilter("i opened the agent ethical s this morning", 15);
+        assert!(v.iter().any(|e| e.correct == "agenetic os"));
     }
 
     #[test]

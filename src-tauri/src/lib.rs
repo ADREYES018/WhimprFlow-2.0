@@ -94,6 +94,27 @@ fn emit_bar_state(app: &tauri::AppHandle, state: &'static str) {
     let _ = app.emit_to(OVERLAY_LABEL, "whimpr://flowbar/state", BarStatePayload { state });
 }
 
+
+#[tauri::command]
+fn list_models() -> Vec<String> {
+    let mut models = vec!["auto".to_string()];
+    #[cfg(target_os = "macos")]
+    let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Application Support/WhimprFlow/models");
+    #[cfg(not(target_os = "macos"))]
+    let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("WhimprFlow/models");
+    
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.ends_with(".bin") || name.ends_with(".gguf") {
+                    models.push(name.to_string());
+                }
+            }
+        }
+    }
+    models
+}
+
 #[tauri::command]
 fn get_settings() -> whimpr_core::Settings {
     hotkey::current_settings()
@@ -238,6 +259,23 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
     Ok(())
 }
 
+fn show_or_create_hub<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(w) = app.get_webview_window(HUB_LABEL) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    } else if let Ok(w) = WebviewWindowBuilder::new(app, HUB_LABEL, WebviewUrl::App("index.html".into()))
+        .title("WhimprFlow")
+        .inner_size(920.0, 640.0)
+        .min_inner_size(720.0, 480.0)
+        .visible(true)
+        .build()
+    {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -253,13 +291,21 @@ pub fn run() {
             request_microphone,
             request_accessibility,
             request_input_monitoring,
-            set_api_key
+            set_api_key,
+            list_models
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == HUB_LABEL {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
-            // Regular app: shows in the Dock with a normal, focusable main window.
-            // (Can switch to a menu-bar-only accessory app later for the Wispr look.)
+            // Menu-bar accessory app: lives in the top menu bar, hidden from the macOS Dock.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Regular);
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             build_overlay(app)?;
             let hub = build_hub(app)?;
@@ -277,16 +323,21 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit WhimprFlow", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &demo_rec, &demo_idle, &sep, &quit])?;
 
+            let handle_for_tray = app.handle().clone();
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => {
-                        if let Some(w) = app.get_webview_window(HUB_LABEL) {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                .on_tray_icon_event(move |_tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        show_or_create_hub(&handle_for_tray);
                     }
+                })
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => show_or_create_hub(app),
                     "demo_rec" => emit_bar_state(app, "recording"),
                     "demo_idle" => emit_bar_state(app, "idle"),
                     "quit" => app.exit(0),

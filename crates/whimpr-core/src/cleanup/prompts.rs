@@ -7,7 +7,7 @@
 /// modifier ([`super::levels::CleanupLevel::modifier`]) is appended to this.
 pub const SYSTEM_PROMPT: &str = r#"You are an Agentic OS runtime for WhimprFlow. You have two actions:
 1. DICTATE: Clean up the user's speech and return it for typing. Fix grammar and hesitations, but do NOT execute commands.
-2. COMMAND: The user is asking to perform an OS action based on their active window context. Use "start_recording" specifically when the user asks to start a meeting, take meeting notes, or launch Oatmeal.
+2. COMMAND: The user uses the wake word "hey shrimp" followed by a command. If the transcript starts with or contains "hey shrimp", YOU MUST issue a "command" JSON. Use "start_recording" specifically when the user asks to start a meeting, take meeting notes, or launch Oatmeal.
 
 Output ONLY valid JSON matching this schema:
 {
@@ -27,57 +27,65 @@ pub const FEW_SHOT: &[(&str, &str)] = &[
     // a question in the dictation that must NOT be answered.
     (
         "um so i think we should uh meet at 2 actually 3 period does that work question mark",
-        "So I think we should meet at 3. Does that work?",
+        r#"{"type": "dictate", "text_to_paste": "So I think we should meet at 3. Does that work?"}"#,
     ),
     // "no wait" reversal: drop the ABANDONED target, keep what comes after the cue.
     (
         "book the room for monday no wait tuesday",
-        "Book the room for Tuesday.",
+        r#"{"type": "dictate", "text_to_paste": "Book the room for Tuesday."}"#,
     ),
     // "scratch that" value correction: keep the restated value.
     (
         "the total comes to fifty dollars scratch that sixty dollars",
-        "The total comes to sixty dollars.",
+        r#"{"type": "dictate", "text_to_paste": "The total comes to sixty dollars."}"#,
     ),
     // Spoken enumeration -> numbered list with real newlines.
     (
         "my top goals this week are one finish the report two send the presentation",
-        "My top goals this week are:\n1. Finish the report\n2. Send the presentation",
+        r#"{"type": "dictate", "text_to_paste": "My top goals this week are:\n1. Finish the report\n2. Send the presentation"}"#,
     ),
     // "bullet point" cue -> bulleted list with real newlines.
     (
         "grocery list bullet point milk bullet point eggs bullet point bread",
-        "Grocery list:\n- Milk\n- Eggs\n- Bread",
+        r#"{"type": "dictate", "text_to_paste": "Grocery list:\n- Milk\n- Eggs\n- Bread"}"#,
     ),
     // "new paragraph" cue (already normalized to a [[NP]] marker) -> keep the marker
     // in place; a period before it is natural.
     (
         "hey team the launch is on friday [[NP]] let me know if you have questions",
-        "Hey team, the launch is on Friday. [[NP]] Let me know if you have questions.",
+        r#"{"type": "dictate", "text_to_paste": "Hey team, the launch is on Friday. [[NP]] Let me know if you have questions."}"#,
     ),
     // Single "new line" cue (normalized to a [[NL]] marker) -> keep the marker; do
     // NOT turn it into a period. It is a soft line break.
     (
         "text me when you land [[NL]] i'll come pick you up",
-        "Text me when you land [[NL]] I'll come pick you up.",
+        r#"{"type": "dictate", "text_to_paste": "Text me when you land [[NL]] I'll come pick you up."}"#,
     ),
     // Ordinal enumeration ("first ... second ... third") -> numbered list, same as
     // cardinal. Small models otherwise flatten ordinals into an inline comma list.
     (
         "the plan is first we scope it then second we build then third we ship",
-        "The plan is:\n1. We scope it\n2. We build\n3. We ship",
+        r#"{"type": "dictate", "text_to_paste": "The plan is:\n1. We scope it\n2. We build\n3. We ship"}"#,
     ),
     // Near no-op: remove filler and a stutter only — do NOT rewrite or add anything.
     // (Anti-over-editing anchor; small models love to paraphrase without one.)
     (
         "um so yeah i think the the demo went well and uh we should probably follow up next week",
-        "I think the demo went well and we should probably follow up next week.",
+        r#"{"type": "dictate", "text_to_paste": "I think the demo went well and we should probably follow up next week."}"#,
     ),
     // Genuine "actually" as an intensifier — NOT a correction, so keep it.
     // (Anti-over-triggering anchor so corrections stay context-aware.)
     (
         "i actually really liked the new design",
-        "I actually really liked the new design.",
+        r#"{"type": "dictate", "text_to_paste": "I actually really liked the new design."}"#,
+    ),
+    (
+        "hey shrimp open terminal",
+        r#"{"type": "command", "command_intent": "open_app", "command_target": "Terminal"}"#,
+    ),
+    (
+        "hey shrimp start oatmeal",
+        r#"{"type": "command", "command_intent": "start_recording", "command_target": ""}"#,
     ),
 ];
 

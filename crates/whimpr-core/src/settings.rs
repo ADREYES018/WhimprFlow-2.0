@@ -22,8 +22,10 @@ pub enum CleanupMode {
     Anthropic,
 }
 
-fn default_trigger_key() -> String { "Fn".to_string() }
+fn default_trigger_key() -> String { "Option + Space".to_string() }
+fn default_trigger_mode() -> String { "hold".to_string() }
 fn default_whisper_model() -> String { "auto".to_string() }
+fn default_local_model() -> String { "auto".to_string() }
 
 /// Persisted user configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,9 +44,13 @@ pub struct Settings {
     /// The hotkey used to trigger recording (e.g. "Fn", "Left Control", "Right Alt")
     #[serde(default = "default_trigger_key")]
     pub trigger_key: String,
+    #[serde(default = "default_trigger_mode")]
+    pub trigger_mode: String,
     /// The ASR model file to use (e.g. "ggml-small.en.bin"). "auto" picks the largest available.
     #[serde(default = "default_whisper_model")]
     pub whisper_model: String,
+    #[serde(default = "default_local_model")]
+    pub local_model: String,
 }
 
 impl Default for Settings {
@@ -57,7 +63,9 @@ impl Default for Settings {
             anthropic_model: "claude-haiku-4-5".to_string(),
             sound_on_start: true,
             trigger_key: default_trigger_key(),
+            trigger_mode: default_trigger_mode(),
             whisper_model: default_whisper_model(),
+            local_model: default_local_model(),
         }
     }
 }

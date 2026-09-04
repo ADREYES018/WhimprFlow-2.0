@@ -52,6 +52,7 @@ impl LocalWorker {
 impl Drop for LocalWorker {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -105,24 +106,29 @@ pub fn worker_bin_path() -> Option<PathBuf> {
 /// The local cleanup model path (same models dir as whisper/ASR). Prefer the
 /// larger, much more capable Qwen3-4B if present (far better at
 /// self-corrections and structure than the 1.5B); fall back to the 1.5B otherwise.
-pub fn model_path() -> PathBuf {
+pub fn model_path(setting_name: &str) -> PathBuf {
     let dir = app_support_dir().join("models");
+    if setting_name != "auto" && !setting_name.is_empty() {
+        return dir.join(setting_name);
+    }
+
     for name in [
         "qwen3-4b-instruct-2507-q4_k_m.gguf",
         "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        "qwen2.5-0.5b-instruct-q4_k_m.gguf",
     ] {
         let p = dir.join(name);
         if p.exists() {
             return p;
         }
     }
-    dir.join("qwen2.5-1.5b-instruct-q4_k_m.gguf")
+    dir.join("qwen2.5-0.5b-instruct-q4_k_m.gguf")
 }
 
 /// Spawn the worker if both the binary and the model are present.
-pub fn spawn_default() -> Option<LocalWorker> {
+pub fn spawn_default(setting_name: &str) -> Option<LocalWorker> {
     let bin = worker_bin_path()?;
-    let model = model_path();
+    let model = model_path(setting_name);
     if !model.exists() {
         eprintln!("[whimpr] local model not found at {}", model.display());
         return None;

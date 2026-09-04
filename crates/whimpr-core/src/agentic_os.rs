@@ -191,7 +191,9 @@ pub fn handle_start_recording() -> Result<String, String> {
             
             for path in possible_paths.iter() {
                 if std::path::Path::new(path).exists() {
-                    let _ = Command::new("node")
+                    let node_path = format!("{}/.local/bin/node", home);
+                    let cmd_node = if std::path::Path::new(&node_path).exists() { node_path } else { "node".to_string() };
+                    let _ = Command::new(cmd_node)
                         .arg(path)
                         .spawn(); // detaches
                     std::thread::sleep(std::time::Duration::from_millis(500)); // give it a moment to bind
