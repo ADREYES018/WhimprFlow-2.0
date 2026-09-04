@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 
 export type IconName =
   | "home"
+  | "meetings"
   | "insights"
   | "dictionary"
   | "snippets"
@@ -24,6 +25,10 @@ export type IconName =
 
 const PATHS: Record<IconName, string[]> = {
   home: ["M4 11l8-7 8 7", "M6 10v10h12V10"],
+  meetings: [
+    "M15 10l5-3v10l-5-3v-4z",
+    "M4 6h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+  ],
   insights: ["M4 20h16", "M8 20v-6", "M12 20V6", "M16 20v-9"],
   dictionary: [
     "M12 7c-1.8-1.2-4-1.5-6-1v11c2-.5 4.2-.2 6 1 1.8-1.2 4-1.5 6-1V6c-2-.5-4.2-.2-6 1z",

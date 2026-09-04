@@ -12,6 +12,7 @@ import { ScratchpadPane } from "./ScratchpadPane";
 import { SnippetsPane } from "./SnippetsPane";
 import { TransformsPane } from "./TransformsPane";
 import { StylePane } from "./StylePane";
+import { MeetingsPane } from "./MeetingsPane";
 import {
   getSettings,
   setSettings,
@@ -213,6 +214,7 @@ export function App() {
         <main style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
           <div style={{ padding: "36px 44px", margin: "0 auto", maxWidth: 1120 }}>
             {page === "home" && <Home />}
+            {page === "meetings" && <MeetingsPane />}
             {page === "insights" && <Insights />}
             {page === "scratchpad" && <ScratchpadPane />}
             {page === "snippets" && <SnippetsPane />}
