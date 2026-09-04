@@ -71,19 +71,26 @@ pub fn model_dir() -> PathBuf {
 }
 
 pub fn ensure_whisper_model(setting_name: &str) -> Result<PathBuf, String> {
+    ensure_whisper_model_in(&model_dir(), setting_name)
+}
+
+/// As `ensure_whisper_model`, but against an explicit directory. Split out so a
+/// test can prove an already-present model short-circuits the download without
+/// reaching into the real application-support directory.
+fn ensure_whisper_model_in(dir: &Path, setting_name: &str) -> Result<PathBuf, String> {
     let name = if setting_name.is_empty() || setting_name == "auto" {
         "ggml-base.en.bin"
     } else {
         setting_name
     };
-    
+
     let spec = WHISPER_MODELS
         .iter()
         .find(|m| m.file == name || m.name == name)
         .or_else(|| WHISPER_MODELS.first())
         .unwrap();
-        
-    let dest = model_dir().join(spec.file);
+
+    let dest = dir.join(spec.file);
     if is_present(&dest) {
         return Ok(dest);
     }
@@ -407,13 +414,33 @@ mod tests {
         );
     }
 
+    /// An already-downloaded model must be returned as-is. If this regresses,
+    /// every launch re-fetches gigabytes over the network, so the test drives
+    /// `ensure_whisper_model_in` itself rather than the `is_present` gate it
+    /// happens to use: the point is that the download is never reached, and only
+    /// the real function can show that. It stays offline for the same reason —
+    /// a seeded model means no request is ever made.
     #[test]
     fn ensure_whisper_model_returns_existing_without_download() {
-        let dest = scratch("existing");
-        std::fs::write(&dest, vec![b'x'; 2_000_000]).unwrap();
-        // We can't easily test ensure_whisper_model directly with a scratch path,
-        // so we just test `is_present`.
-        assert!(is_present(&dest));
+        let dir = scratch("existing").parent().unwrap().to_path_buf();
+        let seeded = dir.join("ggml-base.en.bin");
+        std::fs::write(&seeded, vec![b'x'; 2_000_000]).unwrap();
+
+        let got = ensure_whisper_model_in(&dir, "auto").expect("a present model must be returned");
+        assert_eq!(got, seeded);
+        assert!(
+            !dir.join("ggml-base.en.bin.part").exists(),
+            "a present model must not start a download"
+        );
+    }
+
+    /// A `.part` alone is a half-finished download, never a usable model. If it
+    /// counted as present, whisper would be handed a truncated file.
+    #[test]
+    fn a_part_file_alone_does_not_count_as_a_present_model() {
+        let dir = scratch("partonly").parent().unwrap().to_path_buf();
+        std::fs::write(dir.join("ggml-base.en.bin.part"), vec![b'x'; 2_000_000]).unwrap();
+        assert!(!is_present(&dir.join("ggml-base.en.bin")));
     }
 
     #[test]
