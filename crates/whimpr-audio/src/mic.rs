@@ -673,3 +673,23 @@ pub fn is_mic_recording() -> bool {
         .map(|slot| slot.is_some())
         .unwrap_or(false)
 }
+
+pub fn set_mic_muted(muted: bool) -> Result<bool, String> {
+    let slot = ACTIVE.lock().map_err(|_| "mic lock poisoned".to_string())?;
+    if let Some(ref mic) = *slot {
+        mic.set_muted(muted);
+        Ok(muted)
+    } else {
+        Err("microphone is not currently active".into())
+    }
+}
+
+pub fn is_mic_muted() -> Result<bool, String> {
+    let slot = ACTIVE.lock().map_err(|_| "mic lock poisoned".to_string())?;
+    if let Some(ref mic) = *slot {
+        Ok(mic.is_muted())
+    } else {
+        Ok(false)
+    }
+}
+

@@ -443,6 +443,451 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn save_settings(
+    display_name: String,
+    language: String,
+    followup_style: String,
+    followup_custom: String,
+    chunk_seconds: u32,
+    mic_enabled: bool,
+) -> Result<whimpr_core::Settings, String> {
+    let mut s = hotkey::current_settings();
+    s.display_name = display_name;
+    s.language = language;
+    s.followup_style = followup_style;
+    s.followup_custom = followup_custom;
+    s.chunk_seconds = chunk_seconds;
+    s.mic_enabled = mic_enabled;
+    hotkey::update_settings(s.clone());
+    Ok(s)
+}
+
+#[tauri::command]
+fn list_homework() -> Vec<whimpr_notes::HomeworkItem> {
+    whimpr_notes::list_homework()
+}
+
+#[tauri::command]
+fn add_homework(meeting_id: String, title: String, due_date: String) -> Result<whimpr_notes::HomeworkItem, String> {
+    whimpr_notes::add_homework(&meeting_id, &title, &due_date)
+}
+
+#[tauri::command]
+fn set_homework_done(id: String, done: bool) -> Result<(), String> {
+    whimpr_notes::set_homework_done(&id, done)
+}
+
+#[tauri::command]
+fn delete_homework(id: String) -> Result<(), String> {
+    whimpr_notes::delete_homework(&id)
+}
+
+const CHAT_TOKEN_EVENT: &str = "chat-token";
+
+fn chat_token_sink(app: tauri::AppHandle) -> impl FnMut(&str) {
+    use tauri::Emitter;
+    let mut seq = 0u32;
+    move |piece: &str| {
+        seq += 1;
+        let _ = app.emit(
+            CHAT_TOKEN_EVENT,
+            serde_json::json!({ "seq": seq, "text": piece }),
+        );
+    }
+}
+
+#[tauri::command(async)]
+fn generate_study_plan(
+    id: String,
+    settings: whimpr_notes::StudySettings,
+    force: bool,
+) -> Result<String, String> {
+    whimpr_notes::generate_study_plan(&id, &settings, force)
+}
+
+#[tauri::command]
+fn cached_study_plan(id: String) -> Result<Option<String>, String> {
+    whimpr_notes::study::cached_study_plan(&id)
+}
+
+#[tauri::command(async)]
+fn generate_flashcards(
+    id: String,
+    settings: whimpr_notes::StudySettings,
+    force: bool,
+) -> Result<Vec<whimpr_notes::Flashcard>, String> {
+    whimpr_notes::generate_flashcards(&id, &settings, force)
+}
+
+#[tauri::command]
+fn cached_flashcards(id: String) -> Result<Option<Vec<whimpr_notes::Flashcard>>, String> {
+    whimpr_notes::study::cached_flashcards(&id)
+}
+
+#[tauri::command(async)]
+fn generate_quiz(
+    id: String,
+    settings: whimpr_notes::StudySettings,
+    force: bool,
+) -> Result<Vec<whimpr_notes::QuizQuestion>, String> {
+    whimpr_notes::generate_quiz(&id, &settings, force)
+}
+
+#[tauri::command]
+fn cached_quiz(id: String) -> Result<Option<Vec<whimpr_notes::QuizQuestion>>, String> {
+    whimpr_notes::study::cached_quiz(&id)
+}
+
+#[tauri::command]
+fn last_study_settings(id: String) -> Result<Option<whimpr_notes::StudySettings>, String> {
+    whimpr_notes::study::last_settings(&id)
+}
+
+#[tauri::command(async)]
+fn ask_meeting(app: tauri::AppHandle, id: String, question: String) -> Result<String, String> {
+    let live = id.trim().is_empty();
+    let transcript = if live {
+        whimpr_meetings::live_lines()
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        whimpr_meetings::library::transcript_text(&id)?
+    };
+    let mut sink = chat_token_sink(app);
+    whimpr_notes::ask_meeting(&transcript, &question, live, &mut sink)
+}
+
+#[tauri::command(async)]
+fn ask_library(app: tauri::AppHandle, question: String) -> Result<whimpr_notes::LibraryAnswer, String> {
+    let mut sink = chat_token_sink(app);
+    whimpr_notes::ask_library(&question, &mut sink)
+}
+
+#[tauri::command(async)]
+fn draft_followup(app: tauri::AppHandle, id: String) -> Result<String, String> {
+    let notes = whimpr_meetings::library::followup_source(&id)?;
+    let s = hotkey::current_settings();
+    let style = whimpr_notes::FollowupStyle::from_settings(&s.followup_style, &s.followup_custom);
+    let mut sink = chat_token_sink(app);
+    whimpr_notes::draft_followup(std::path::Path::new(""), &notes, &style, &mut sink)
+}
+
+#[tauri::command(async)]
+fn write_notes(
+    id: String,
+    template: whimpr_meetings::chat::Template,
+    force: bool,
+) -> Result<String, String> {
+    whimpr_meetings::library::write_notes(&id, template, force)
+}
+
+#[tauri::command(async)]
+fn answer_live_question(question: String) -> Result<String, String> {
+    let recent = whimpr_meetings::live_lines()
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let dummy_path = std::path::Path::new("");
+    whimpr_notes::chat::answer_live(dummy_path, &recent, &question, &mut |_| {})
+}
+
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+fn calendar_authorized() -> bool {
+    whimpr_meetings::calendar::authorized()
+}
+
+#[tauri::command]
+fn calendar_request_access() -> Result<bool, String> {
+    whimpr_meetings::calendar::request_access()
+}
+
+#[tauri::command]
+fn list_events(days: u32) -> Result<whimpr_meetings::calendar::CalendarFeed, String> {
+    whimpr_meetings::calendar::list_events(days)
+}
+
+#[tauri::command]
+fn open_calendar_settings() {
+    #[cfg(target_os = "macos")]
+    open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars");
+}
+
+#[tauri::command]
+fn chat_model_status() -> serde_json::Value {
+    let path = whimpr_media::model::model_dir().join(whimpr_media::model::CHAT_MODEL_FILE);
+    serde_json::json!({
+        "path": path.display().to_string(),
+        "present": path.exists(),
+        "loaded": whimpr_notes::chat::is_loaded(),
+        "approx_mb": 4000,
+    })
+}
+
+#[tauri::command]
+fn default_model_path() -> String {
+    whimpr_media::model::model_dir()
+        .join("ggml-large-v3-turbo-q8_0.bin")
+        .display()
+        .to_string()
+}
+
+#[tauri::command(async)]
+fn ensure_chat_model() -> Result<String, String> {
+    whimpr_media::model::ensure_chat_model().map(|p| p.display().to_string())
+}
+
+#[tauri::command(async)]
+fn ensure_model() -> Result<String, String> {
+    whimpr_media::model::ensure_whisper_model("large-v3-turbo")
+        .or_else(|_| whimpr_media::model::ensure_whisper_model("base.en"))
+        .map(|p| p.display().to_string())
+}
+
+#[tauri::command(async)]
+fn warm_chat_model() -> Result<(), String> {
+    whimpr_notes::chat::warm(std::path::Path::new(""))
+}
+
+#[tauri::command(async)]
+fn unload_chat_model() {
+    whimpr_notes::chat::unload();
+}
+
+#[tauri::command]
+fn check_for_update() -> whimpr_media::update::UpdateStatus {
+    whimpr_media::update::check()
+}
+
+#[tauri::command(async)]
+fn install_update(url: String) -> Result<(), String> {
+    whimpr_media::update::install(&url)
+}
+
+#[tauri::command]
+fn open_update_download(url: String) -> Result<(), String> {
+    whimpr_media::update::open_download(&url)
+}
+
+#[tauri::command(async)]
+fn release_notes() -> Result<whimpr_media::update::ReleaseNotes, String> {
+    whimpr_media::update::notes()
+}
+
+#[tauri::command(async)]
+fn latex_from_speech(speech: String) -> Result<String, String> {
+    whimpr_media::latex::from_speech(&speech)
+}
+
+#[tauri::command(async)]
+fn video_probe(url: String) -> Result<whimpr_media::video::VideoInfo, String> {
+    whimpr_media::video::probe(&url)
+}
+
+#[tauri::command(async)]
+fn video_import(meeting_id: String, url: String, start: String, end: String) -> Result<String, String> {
+    whimpr_media::video::import(&meeting_id, &url, &start, &end)
+}
+
+#[tauri::command]
+fn list_meetings() -> Vec<whimpr_meetings::Meeting> {
+    whimpr_meetings::library::list_meetings()
+}
+
+#[tauri::command]
+fn search_meetings(query: String) -> Vec<whimpr_meetings::Meeting> {
+    whimpr_meetings::library::search_meetings(&query)
+}
+
+#[tauri::command]
+fn delete_meeting(id: String) -> Result<String, String> {
+    whimpr_meetings::library::delete_meeting(&id)
+}
+
+#[tauri::command]
+fn rename_meeting(id: String, title: String) -> Result<(), String> {
+    whimpr_meetings::library::rename_meeting(&id, &title)
+}
+
+#[tauri::command]
+fn export_meeting(id: String) -> Result<String, String> {
+    whimpr_meetings::library::export_meeting(&id)
+}
+
+#[tauri::command]
+fn list_folders() -> Vec<whimpr_meetings::library::Folder> {
+    whimpr_meetings::library::list_folders()
+}
+
+#[tauri::command]
+fn create_folder(name: String) -> Result<(), String> {
+    whimpr_meetings::library::create_folder(&name)
+}
+
+#[tauri::command]
+fn rename_folder(old: String, new: String) -> Result<(), String> {
+    whimpr_meetings::library::rename_folder(&old, &new)
+}
+
+#[tauri::command]
+fn delete_folder(name: String) -> Result<(), String> {
+    whimpr_meetings::library::delete_folder(&name)
+}
+
+#[tauri::command]
+fn move_meeting_to_folder(id: String, folder: Option<String>) -> Result<(), String> {
+    whimpr_meetings::library::move_meeting_to_folder(&id, folder.as_deref())
+}
+
+#[tauri::command]
+fn meeting_typed_notes(id: String) -> Option<String> {
+    whimpr_meetings::library::typed_notes(&id).ok()
+}
+
+#[tauri::command]
+fn save_notes(title: String, body: String) -> Result<Option<String>, String> {
+    if let Ok(dir) = whimpr_meetings::library::meeting_dir(&title) {
+        let p = whimpr_meetings::session::write_notes(&dir, &title, &body)?;
+        return Ok(Some(p.display().to_string()));
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+fn meeting_segments(id: String) -> Result<Vec<whimpr_meetings::library::TranscriptLine>, String> {
+    whimpr_meetings::library::transcript_lines(&id)
+}
+
+#[tauri::command(async)]
+fn finish_meeting(id: String, model_path: String, language: String) -> Result<whimpr_meetings::Meeting, String> {
+    whimpr_meetings::finish_meeting(&id, &model_path, &language)
+}
+
+#[tauri::command(async)]
+fn search_snippets(query: String) -> Vec<whimpr_meetings::library::SearchHit> {
+    whimpr_meetings::library::search_hits(&query)
+}
+
+#[tauri::command]
+fn data_status() -> serde_json::Value {
+    serde_json::json!({
+        "dataVersion": whimpr_meetings::store::DATA_VERSION,
+        "storedVersion": whimpr_meetings::store::stored_version(),
+        "writesLocked": whimpr_meetings::store::writes_locked(),
+        "lockReason": whimpr_meetings::store::lock_reason(),
+    })
+}
+
+#[tauri::command(async)]
+fn start_session(
+    app: tauri::AppHandle,
+    title: String,
+    language: String,
+) -> Result<whimpr_meetings::SessionPaths, String> {
+    whimpr_meetings::begin_session_with_emitter(&title, &language, move |line| {
+        let _ = app.emit("whimpr://live-line", line);
+    })
+}
+
+#[tauri::command(async)]
+fn stop_session(
+    model_path: String,
+    language: String,
+) -> Result<whimpr_meetings::session::MeetingResult, String> {
+    whimpr_meetings::stop_session(&model_path, &language)
+}
+
+#[tauri::command(async)]
+fn continue_session(
+    app: tauri::AppHandle,
+    id: String,
+    language: String,
+) -> Result<whimpr_meetings::SessionPaths, String> {
+    let meeting = whimpr_meetings::library::meeting(&id)?;
+    whimpr_meetings::continue_session_with_emitter(
+        std::path::Path::new(&meeting.dir),
+        &meeting.title,
+        &language,
+        move |line| {
+            let _ = app.emit("whimpr://live-line", line);
+        },
+    )
+}
+
+#[tauri::command]
+fn is_session_active() -> bool {
+    whimpr_meetings::is_session_active()
+}
+
+#[tauri::command]
+fn session_elapsed_ms() -> Option<u64> {
+    whimpr_meetings::session_elapsed_ms()
+}
+
+#[tauri::command]
+fn set_mic_muted(muted: bool) -> Result<bool, String> {
+    whimpr_audio::mic::set_mic_muted(muted)
+}
+
+#[tauri::command]
+fn is_mic_muted() -> Result<bool, String> {
+    whimpr_audio::mic::is_mic_muted()
+}
+
+#[tauri::command]
+fn start_mic_recording(path: String) -> Result<(), String> {
+    whimpr_audio::mic::start_mic_recording(std::path::PathBuf::from(path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn stop_mic_recording() -> Result<String, String> {
+    whimpr_audio::mic::stop_mic_recording()
+        .map(|p| p.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn is_mic_recording() -> bool {
+    whimpr_audio::mic::is_mic_recording()
+}
+
+#[tauri::command]
+fn start_sysaudio_recording(path: String) -> Result<(), String> {
+    whimpr_audio::sysaudio::start_sysaudio_recording(std::path::PathBuf::from(path)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn stop_sysaudio_recording() -> Result<String, String> {
+    whimpr_audio::sysaudio::stop_sysaudio_recording()
+        .map(|p| p.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn is_sysaudio_recording() -> bool {
+    whimpr_audio::sysaudio::is_sysaudio_recording()
+}
+
+#[tauri::command]
+fn live_lines() -> Vec<whimpr_meetings::LiveLine> {
+    whimpr_meetings::live_lines()
+}
+
+#[tauri::command(async)]
+fn transcribe_wav(path: String) -> Result<String, String> {
+    let samples = whimpr_meetings::transcribe::load_wav_mono_16k(std::path::Path::new(&path))?;
+    let t = whimpr_meetings::transcribe::transcribe_samples("", &samples, None)?;
+    Ok(t.text)
+}
+
 fn show_or_create_hub<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(w) = app.get_webview_window(HUB_LABEL) {
         let _ = w.show();
@@ -465,6 +910,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_settings,
+            save_settings,
             get_stats,
             get_history,
             get_dictionary,
@@ -504,7 +950,72 @@ pub fn run() {
             accept_pending_style,
             discard_pending_style,
             derive_style_profile,
-            propose_style_profile
+            propose_style_profile,
+            list_homework,
+            add_homework,
+            set_homework_done,
+            delete_homework,
+            generate_study_plan,
+            cached_study_plan,
+            generate_flashcards,
+            cached_flashcards,
+            generate_quiz,
+            cached_quiz,
+            last_study_settings,
+            ask_meeting,
+            ask_library,
+            draft_followup,
+            write_notes,
+            answer_live_question,
+            app_version,
+            calendar_authorized,
+            calendar_request_access,
+            list_events,
+            open_calendar_settings,
+            chat_model_status,
+            default_model_path,
+            ensure_chat_model,
+            ensure_model,
+            warm_chat_model,
+            unload_chat_model,
+            check_for_update,
+            install_update,
+            open_update_download,
+            release_notes,
+            latex_from_speech,
+            video_probe,
+            video_import,
+            list_meetings,
+            search_meetings,
+            delete_meeting,
+            rename_meeting,
+            export_meeting,
+            list_folders,
+            create_folder,
+            rename_folder,
+            delete_folder,
+            move_meeting_to_folder,
+            meeting_typed_notes,
+            save_notes,
+            meeting_segments,
+            finish_meeting,
+            search_snippets,
+            data_status,
+            start_session,
+            stop_session,
+            continue_session,
+            is_session_active,
+            session_elapsed_ms,
+            set_mic_muted,
+            is_mic_muted,
+            start_mic_recording,
+            stop_mic_recording,
+            is_mic_recording,
+            start_sysaudio_recording,
+            stop_sysaudio_recording,
+            is_sysaudio_recording,
+            live_lines,
+            transcribe_wav
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -5310,6 +5310,7 @@ dependencies = [
  "whimpr-ipc",
  "whimpr-media",
  "whimpr-meetings",
+ "whimpr-notes",
  "windows 0.58.0",
 ]
 

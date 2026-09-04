@@ -1,6 +1,7 @@
 //! User settings, persisted as JSON. Drives the cleanup engine (which provider,
 //! how aggressive) and other behavior. Kept dependency-light so it lives in core.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ use crate::cleanup::CleanupLevel;
 pub enum CleanupMode {
     /// Paste the raw transcript (no cleanup).
     Raw,
-    /// Local on-device model (default — works offline, no API key).
+    /// Local on-device model (default: works offline, no API key).
     #[default]
     Local,
     /// OpenAI cloud.
@@ -22,6 +23,8 @@ pub enum CleanupMode {
     Anthropic,
 }
 
+fn default_openai_model() -> String { "gpt-4o-mini".to_string() }
+fn default_anthropic_model() -> String { "claude-haiku-4-5".to_string() }
 fn default_trigger_key() -> String { "Option + Space".to_string() }
 fn default_trigger_mode() -> String { "hold".to_string() }
 fn default_whisper_model() -> String { "auto".to_string() }
@@ -29,20 +32,27 @@ fn default_local_model() -> String { "auto".to_string() }
 fn default_wake_word() -> String { "hey shrimp".to_string() }
 fn default_true() -> bool { true }
 fn default_command_provider() -> String { "auto".to_string() }
+fn default_chunk_seconds() -> u32 { 30 }
+fn default_followup_style() -> String { "brief".to_string() }
 
 /// Persisted user configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(default)]
     pub cleanup_mode: CleanupMode,
+    #[serde(default)]
     pub cleanup_level: CleanupLevel,
+    #[serde(default = "default_openai_model")]
     pub openai_model: String,
     /// API root for the "OpenAI" cleanup mode, e.g. `https://openrouter.ai/api/v1`
     /// to route through OpenRouter instead of OpenAI directly (same wire format).
     /// Empty string (the default) means OpenAI's own endpoint.
     #[serde(default)]
     pub openai_base_url: String,
+    #[serde(default = "default_anthropic_model")]
     pub anthropic_model: String,
     /// Play the record-start ping.
+    #[serde(default = "default_true")]
     pub sound_on_start: bool,
     /// The hotkey used to trigger recording (e.g. "Fn", "Left Control", "Right Alt")
     #[serde(default = "default_trigger_key")]
@@ -70,6 +80,23 @@ pub struct Settings {
     /// Expand snippet triggers after cleanup.
     #[serde(default = "default_true")]
     pub snippets_enabled: bool,
+
+    // Merged Oatmeal settings
+    #[serde(default, alias = "displayName")]
+    pub display_name: String,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default = "default_followup_style", alias = "followupStyle")]
+    pub followup_style: String,
+    #[serde(default, alias = "followupCustom")]
+    pub followup_custom: String,
+    #[serde(default = "default_chunk_seconds", alias = "chunkSeconds")]
+    pub chunk_seconds: u32,
+    #[serde(default = "default_true", alias = "micEnabled")]
+    pub mic_enabled: bool,
+
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 impl Default for Settings {
@@ -77,9 +104,9 @@ impl Default for Settings {
         Self {
             cleanup_mode: CleanupMode::default(),
             cleanup_level: CleanupLevel::Light,
-            openai_model: "gpt-4o-mini".to_string(),
+            openai_model: default_openai_model(),
             openai_base_url: String::new(),
-            anthropic_model: "claude-haiku-4-5".to_string(),
+            anthropic_model: default_anthropic_model(),
             sound_on_start: true,
             trigger_key: default_trigger_key(),
             trigger_mode: default_trigger_mode(),
@@ -90,6 +117,13 @@ impl Default for Settings {
             command_provider: default_command_provider(),
             style_enabled: false,
             snippets_enabled: true,
+            display_name: String::new(),
+            language: String::new(),
+            followup_style: default_followup_style(),
+            followup_custom: String::new(),
+            chunk_seconds: default_chunk_seconds(),
+            mic_enabled: true,
+            extra: HashMap::new(),
         }
     }
 }
@@ -119,6 +153,8 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.cleanup_mode, CleanupMode::Local);
         assert_eq!(s.cleanup_level, CleanupLevel::Light);
+        assert_eq!(s.chunk_seconds, 30);
+        assert!(s.mic_enabled);
     }
 
     #[test]
@@ -154,5 +190,17 @@ mod tests {
         let s: Settings = serde_json::from_str(old).expect("old settings must still parse");
         assert_eq!(s.wake_word, "hey shrimp");
         assert!(s.snippets_enabled);
+    }
+
+    #[test]
+    fn preserves_unknown_keys_across_roundtrip() {
+        let text = r#"{
+            "cleanup_mode": "local",
+            "some_custom_future_key": "custom_value"
+        }"#;
+        let s: Settings = serde_json::from_str(text).unwrap();
+        let serialized = serde_json::to_string(&s).unwrap();
+        assert!(serialized.contains("some_custom_future_key"));
+        assert!(serialized.contains("custom_value"));
     }
 }
