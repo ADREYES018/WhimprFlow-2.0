@@ -13,6 +13,7 @@ pub mod asr;
 pub mod cleanup;
 pub mod diagnostics;
 pub mod dictionary;
+pub mod gpu_gate;
 pub mod router;
 pub mod scratchpad;
 pub mod settings;

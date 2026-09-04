@@ -5153,6 +5153,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "whimpr-notes"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "whimpr-core",
+ "whimpr-media",
+ "whimpr-meetings",
+]
+
+[[package]]
 name = "whimpr-sidecar"
 version = "0.1.1"
 

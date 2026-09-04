@@ -29,5 +29,4 @@ pub fn restrict_dir(path: &Path) {
     }
 }
 
-#[cfg(test)]
-pub(crate) static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

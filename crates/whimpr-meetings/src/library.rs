@@ -686,7 +686,7 @@ fn meta_template(dir: &Path) -> Option<crate::chat::Template> {
 /// Read `meta.json` as a JSON object, or an empty one if it doesn't exist or
 /// isn't valid JSON. Every writer merges into this so fields it doesn't touch
 /// — a rename's title, a generation's chosen template — survive.
-pub(crate) fn read_meta(dir: &Path) -> serde_json::Map<String, serde_json::Value> {
+pub fn read_meta(dir: &Path) -> serde_json::Map<String, serde_json::Value> {
     std::fs::read_to_string(dir.join("meta.json"))
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
@@ -711,7 +711,7 @@ static META_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Read `meta.json`, let `edit` change it, and write it back — with no window for
 /// another thread to read the same document and clobber the result.
-pub(crate) fn update_meta(
+pub fn update_meta(
     dir: &Path,
     edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
 ) -> Result<(), String> {
@@ -916,7 +916,7 @@ pub fn source_text(id: &str) -> Result<String, String> {
 
 /// Pull the spoken words out of a `transcript.md`, dropping the title, the
 /// recorded-at line, the `## Transcript` heading and the `**[m:ss]**` stamps.
-pub(crate) fn strip_transcript_markup(md: &str) -> String {
+pub fn strip_transcript_markup(md: &str) -> String {
     let mut out = String::new();
     for line in md.lines() {
         let line = line.trim();

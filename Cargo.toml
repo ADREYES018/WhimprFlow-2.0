@@ -11,6 +11,7 @@ members = [
     "crates/whimpr-llm-worker",
     "crates/whimpr-media",
     "crates/whimpr-meetings",
+    "crates/whimpr-notes",
     "crates/whimpr-sidecar",
     "src-tauri",
 ]
