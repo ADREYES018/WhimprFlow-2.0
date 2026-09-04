@@ -130,6 +130,10 @@ why it looked like nothing was happening at all). If you still hit this:
   `.exe` from PowerShell on Windows) and hold the key once — every failure
   path also logs a `[whimpr]`-prefixed line explaining what happened.
 
+## Credits
+
+This project incorporates meeting capture, live transcription, library, notes, study, media, and calendar subsystems from [Oatmeal](https://github.com/VedSoni-dev/oatmeal), copyright (c) Vedant Soni, licensed under the MIT License. Ported files retain their original headers.
+
 ## Notes & disclaimers
 
 - **Not affiliated with, endorsed by, or connected to Wispr Flow or any other product.** WhimprFlow is an independent, from-scratch reimplementation of the dictation workflow, with its own name, branding, colors, strings, and code. No third-party code or assets are included.
