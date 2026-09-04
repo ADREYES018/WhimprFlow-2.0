@@ -39,7 +39,7 @@ fn test_recap_structured_output_format_instructions() {
     assert!(RECAP_SYSTEM.contains("Direct Summary"));
     assert!(RECAP_SYSTEM.contains("Markdown table"));
     assert!(RECAP_SYSTEM.contains("Exact Quotes"));
-    assert!(!RECAP_SYSTEM.contains("—"));
+    assert!(!RECAP_SYSTEM.contains('\u{2014}'));
 }
 ```
 
