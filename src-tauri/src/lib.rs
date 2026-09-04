@@ -187,6 +187,11 @@ fn update_transform(transform: whimpr_core::Transform) { hotkey::transform_updat
 fn remove_transform(id: String) -> bool { hotkey::transform_remove(&id) }
 
 #[tauri::command]
+fn run_transform(id: String, source: whimpr_core::TransformSource) -> String {
+    hotkey::transform_run(&id, source)
+}
+
+#[tauri::command]
 fn get_scratchpad() -> whimpr_core::Scratchpad { hotkey::scratchpad_get() }
 
 #[tauri::command]
@@ -937,6 +942,7 @@ pub fn run() {
             add_transform,
             update_transform,
             remove_transform,
+            run_transform,
             get_scratchpad,
             set_scratchpad_text,
             set_scratchpad_capture,

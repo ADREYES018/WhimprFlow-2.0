@@ -272,6 +272,14 @@ mod imp {
         let _ = s.save(&transforms_path());
     }
 
+    /// Run a transform on demand from the hub UI (the hotkey path calls
+    /// `run_transform` directly with the utterance it just heard). Snapshots the
+    /// store so the LLM call does not hold the transforms lock.
+    pub fn transform_run(id: &str, source: whimpr_core::TransformSource) -> String {
+        let snapshot = transforms().lock().unwrap().clone();
+        run_transform(id, "", source, &snapshot)
+    }
+
     pub fn transform_remove(id: &str) -> bool {
         let mut s = transforms().lock().unwrap();
         let ok = s.remove(id);
@@ -1145,7 +1153,7 @@ pub use imp::{
     current_settings, dictionary_add, dictionary_entries, dictionary_learn, dictionary_remove,
     history, install, rebuild_providers, stats_summary, update_settings,
     snippets_all, snippet_add, snippet_update, snippet_remove,
-    transforms_all, transform_add, transform_update, transform_remove,
+    transforms_all, transform_add, transform_update, transform_remove, transform_run,
     scratchpad_get, scratchpad_set_text, scratchpad_set_capture,
     style_get, style_mutate, local_worker,
 };
