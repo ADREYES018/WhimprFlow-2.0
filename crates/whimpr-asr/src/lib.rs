@@ -10,7 +10,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 /// A loaded whisper model ready to transcribe utterances.
 pub struct WhisperEngine {
-    ctx: WhisperContext,
+    pub ctx: WhisperContext,
 }
 
 impl WhisperEngine {

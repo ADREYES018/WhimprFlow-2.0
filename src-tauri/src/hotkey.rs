@@ -986,6 +986,16 @@ mod imp {
             TRIGGER_MODE_IS_TOGGLE.store(settings.trigger_mode == "toggle", std::sync::atomic::Ordering::SeqCst);
         }
 
+        // Cancel active dictation when waking from sleep so suspended audio isn't left hanging.
+        whimpr_meetings::sleep::on_wake(|_asleep_ms| {
+            if let Some(slot) = CAPTURE.get() {
+                if let Some(handle) = slot.lock().unwrap().take() {
+                    let _ = handle.stop();
+                }
+            }
+            handle_input(Input::Trigger(whimpr_core::state::TriggerToken::Cancel { at_ms: now_ms() }));
+        });
+
         // Load settings + dictionary, and build cloud providers from stored keys.
         let settings = whimpr_core::Settings::load(&settings_path());
 

@@ -1,0 +1,5 @@
+[target.'cfg(target_os = "macos")']
+rustflags = [
+    "-L", "/Library/Developer/CommandLineTools/usr/lib/swift/macosx",
+    "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
+]

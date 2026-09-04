@@ -5134,6 +5134,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "whimpr-meetings"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "block2",
+ "hound",
+ "objc2",
+ "objc2-foundation",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "whimpr-asr",
+ "whimpr-audio",
+ "whimpr-core",
+ "whimpr-media",
+ "whisper-rs",
+]
+
+[[package]]
 name = "whimpr-sidecar"
 version = "0.1.1"
 
@@ -5160,6 +5179,7 @@ dependencies = [
  "whimpr-core",
  "whimpr-ipc",
  "whimpr-media",
+ "whimpr-meetings",
  "windows 0.58.0",
 ]
 

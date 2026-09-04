@@ -10,6 +10,7 @@ members = [
     "crates/whimpr-cleanup",
     "crates/whimpr-llm-worker",
     "crates/whimpr-media",
+    "crates/whimpr-meetings",
     "crates/whimpr-sidecar",
     "src-tauri",
 ]

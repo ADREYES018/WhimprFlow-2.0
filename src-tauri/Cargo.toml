@@ -19,6 +19,7 @@ whimpr-media = { path = "../crates/whimpr-media" }
 whimpr-audio = { path = "../crates/whimpr-audio" }
 whimpr-asr = { path = "../crates/whimpr-asr" }
 whimpr-cleanup = { path = "../crates/whimpr-cleanup" }
+whimpr-meetings = { path = "../crates/whimpr-meetings" }
 keyring = "3"
 strsim = "0.11"
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
