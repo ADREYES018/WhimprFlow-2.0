@@ -223,3 +223,14 @@ mod tests {
         assert_eq!(resample_to_16k(&input, 16_000), input);
     }
 }
+
+pub mod sysaudio;
+pub mod mic;
+
+pub mod live {
+    #[derive(Clone)]
+    pub struct Lane {}
+    impl Lane {
+        pub fn push(&self, _frames: &[f32], _channels: u16, _sample_rate: u32) {}
+    }
+}
