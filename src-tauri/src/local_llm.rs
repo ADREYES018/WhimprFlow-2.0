@@ -144,3 +144,17 @@ pub fn spawn_default(setting_name: &str) -> Option<LocalWorker> {
         }
     }
 }
+
+/// Send a single user-message prompt to the local worker and return the raw
+/// completion. Used by transforms, which need a free-form LLM call without the
+/// cleanup gates (gates measure divergence from a transcript, meaningless for a
+/// transform).
+pub fn complete(prompt: &str) -> anyhow::Result<String> {
+    let msgs = vec![
+        whimpr_core::cleanup::CleanupMsg { role: "user", content: prompt.to_string() },
+    ];
+    let worker_lock = crate::hotkey::local_worker();
+    let mut guard = worker_lock.lock().unwrap();
+    let worker = guard.as_mut().ok_or_else(|| anyhow::anyhow!("local LLM not available"))?;
+    worker.cleanup(&msgs)
+}

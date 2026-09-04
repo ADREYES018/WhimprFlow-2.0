@@ -230,6 +230,10 @@ mod imp {
     fn snippets() -> &'static Mutex<whimpr_core::SnippetStore> {
         SNIPPETS.get_or_init(|| Mutex::new(whimpr_core::SnippetStore::load(&snippets_path())))
     }
+
+    pub fn local_worker() -> &'static Mutex<Option<crate::local_llm::LocalWorker>> {
+        LOCAL.get_or_init(|| Mutex::new(None))
+    }
     fn style() -> &'static Mutex<whimpr_core::StyleStore> {
         STYLE.get_or_init(|| Mutex::new(whimpr_core::StyleStore::load(&style_path())))
     }
@@ -562,6 +566,44 @@ mod imp {
         }
     }
 
+    /// Resolve a transform's input, run it through the active cleanup provider,
+    /// and return the result. Returns an empty string on any failure, so a
+    /// failed transform pastes nothing rather than pasting a raw prompt.
+    fn run_transform(
+        id: &str,
+        body: &str,
+        source: whimpr_core::TransformSource,
+        store: &whimpr_core::TransformStore,
+    ) -> String {
+        let Some(t) = store.get(id) else {
+            eprintln!("[whimpr] unknown transform: {id}");
+            return String::new();
+        };
+        let input = match source {
+            whimpr_core::TransformSource::Utterance => body.to_string(),
+            whimpr_core::TransformSource::Selection => {
+                match whimpr_core::agentic_os::get_selected_text() {
+                    Ok(Some(s)) => s,
+                    _ => {
+                        eprintln!("[whimpr] transform {id}: nothing selected");
+                        return String::new();
+                    }
+                }
+            }
+            whimpr_core::TransformSource::Scratchpad => scratchpad_get().text,
+        };
+        if input.trim().is_empty() {
+            return String::new();
+        }
+        match crate::local_llm::complete(&t.render(&input)) {
+            Ok(out) => out.trim().to_string(),
+            Err(e) => {
+                eprintln!("[whimpr] transform {id} failed: {e}");
+                String::new()
+            }
+        }
+    }
+
     fn now_ms() -> u64 {
         CLOCK.get().map(|c| c.elapsed().as_millis() as u64).unwrap_or(0)
     }
@@ -693,87 +735,74 @@ mod imp {
                             let active_window = whimpr_core::agentic_os::get_active_window_title().unwrap_or_default();
                             eprintln!("[whimpr] Context -> app: {}, window: {}", active_app, active_window);
 
-                            // The LLM now returns JSON
-                            let raw_lower = raw.to_lowercase().replace(&[',', '.', '!', '?'][..], "");
-                            let json_text = if raw_lower.trim().starts_with("hey shrimp") {
-                                let mut intent = "start_recording";
-                                let mut target = "";
-                                if raw_lower.contains("terminal") {
-                                    intent = "open_app";
-                                    target = "Terminal";
-                                } else if raw_lower.contains("oatmeal") {
-                                    intent = "start_recording";
-                                } else if raw_lower.contains("safari") {
-                                    intent = "open_app";
-                                    target = "Safari";
-                                } else if raw_lower.contains("notes") {
-                                    intent = "open_app";
-                                    target = "Notes";
-                                } else {
-                                    // if it's an app we don't hardcode, try dynamically extracting it if it's "open X"
-                                    if raw_lower.contains("open ") {
-                                        let parts: Vec<&str> = raw_lower.splitn(2, "open ").collect();
-                                        if parts.len() == 2 {
-                                            intent = "open_app";
-                                            // Capitalize the target
-                                            target = parts[1];
-                                        }
-                                    }
-                                }
-                                // Dynamically capitalizing target
-                                let mut final_target = target.to_string();
-                                if intent == "open_app" && !target.is_empty() {
-                                    let mut chars = target.chars();
-                                    if let Some(first) = chars.next() {
-                                        final_target = format!("{}{}", first.to_uppercase(), chars.as_str());
-                                    }
-                                }
-                                
-                                format!(r#"{{"type":"command", "command_intent":"{}", "command_target":"{}"}}"#, intent, final_target)
-                            } else {
-                                clean_transcript(
-                                    &raw, 
-                                    if active_app.is_empty() { None } else { Some(active_app.clone()) }, 
-                                    if active_window.is_empty() { None } else { Some(active_window) }
-                                )
-                            };
-                            
-                            // Parse Agentic OS JSON
-                            #[derive(serde::Deserialize)]
-                            struct AgenticParams {
-                                #[serde(rename = "type")]
-                                kind: String,
-                                text_to_paste: Option<String>,
-                                command_intent: Option<String>,
-                                command_target: Option<String>
-                            }
+                            let settings = current_settings();
+                            let transforms_snapshot = transforms().lock().unwrap().clone();
+                            let snippets_snapshot = snippets().lock().unwrap().clone();
 
-                            let maybe_parsed: Result<AgenticParams, _> = serde_json::from_str(&json_text);
-                            let text = match maybe_parsed {
-                                Ok(params) if params.kind == "command" => {
-                                    eprintln!("[whimpr] COMMAND INTENT DETECTED: {:?}", params.command_intent);
-                                    let intent = params.command_intent.as_deref().unwrap_or("");
-                                    let target = params.command_target.as_deref().unwrap_or("");
-                                    
-                                    // Make pill shift to command mode color
-                                    // Fire "whimpr://flowbar/state" "command"
-                                    let _ = app2.emit("whimpr://flowbar/state", serde_json::json!({ "state": "command" }));
-                                    
-                                    if let Err(e) = whimpr_core::agentic_os::execute_system_command(intent, target) {
-                                        eprintln!("[whimpr] Command failed: {}", e);
+                            let route = whimpr_core::router::route_by_rules(
+                                &raw,
+                                &settings,
+                                &transforms_snapshot,
+                                &snippets_snapshot,
+                            );
+
+                            let text = match route {
+                                whimpr_core::Route::Command { intent, target } => {
+                                    eprintln!("[whimpr] COMMAND: {intent} -> {target}");
+                                    let _ = app2.emit(
+                                        "whimpr://flowbar/state",
+                                        serde_json::json!({ "state": "command" }),
+                                    );
+                                    if let Err(e) =
+                                        whimpr_core::agentic_os::execute_system_command(&intent, &target)
+                                    {
+                                        eprintln!("[whimpr] command failed: {e}");
                                     }
-                                    
-                                    // Wait brief moment for user to see the neon command pill
                                     std::thread::sleep(std::time::Duration::from_millis(800));
-                                    
-                                    String::new() // return empty string so paste skips
-                                },
-                                Ok(params) => params.text_to_paste.unwrap_or_else(|| json_text.clone()),
-                                Err(_) => {
-                                    eprintln!("[whimpr] JSON parse failed, returning raw LLM output.");
-                                    json_text
+                                    String::new()
+                                }
+                                whimpr_core::Route::Snippet { trigger } => snippets_snapshot
+                                    .entries
+                                    .iter()
+                                    .find(|s| s.trigger.eq_ignore_ascii_case(&trigger))
+                                    .map(|s| s.expansion.clone())
+                                    .unwrap_or_default(),
+                                whimpr_core::Route::Transform { id, body, source } => {
+                                    run_transform(&id, &body, source, &transforms_snapshot)
+                                }
+                                whimpr_core::Route::Dictate => {
+                                    let cleaned = clean_transcript(
+                                        &raw,
+                                        if active_app.is_empty() { None } else { Some(active_app.clone()) },
+                                        if active_window.is_empty() { None } else { Some(active_window) },
+                                    );
+                                    if matches!(
+                                        whimpr_core::cleanup::parse_response(&cleaned),
+                                        whimpr_core::cleanup::ModelResponse::Command { .. }
+                                    ) {
+                                        raw.clone()
+                                    } else {
+                                        whimpr_core::router::finalize_dictation(
+                                            &cleaned,
+                                            &settings,
+                                            &snippets_snapshot,
+                                        )
+                                    }
                                 }
                             };
+
+                            // Capture mode sends dictation to the scratchpad instead of the
+                            // cursor. Commands and snippets still behave normally.
+                            if !text.is_empty() && scratchpad_get().capture_mode {
+                                scratchpad_append(&text);
+                                let _ = app2.emit(
+                                    "whimpr://flowbar/state",
+                                    serde_json::json!({ "state": "scratchpad" }),
+                                );
+                                record_dictation(&text, res.duration_secs());
+                                finish();
+                                return;
+                            }
 
                             if text != raw && !text.is_empty() {
                                 eprintln!("[whimpr] CLEANED:   \"{}\"", text);
@@ -1075,7 +1104,7 @@ pub use imp::{
     snippets_all, snippet_add, snippet_update, snippet_remove,
     transforms_all, transform_add, transform_update, transform_remove,
     scratchpad_get, scratchpad_set_text, scratchpad_set_capture,
-    style_get, style_mutate,
+    style_get, style_mutate, local_worker,
 };
 
 // Windows uses the real (but unverified) platform layer in `crate::win`.

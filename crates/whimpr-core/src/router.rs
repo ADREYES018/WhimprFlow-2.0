@@ -145,6 +145,16 @@ pub fn route_by_rules(
     Route::Dictate
 }
 
+/// The last step before text is pasted: snippet expansion, when enabled.
+/// Runs after cleanup and after `apply_vocab`, so a dictionary correction can
+/// produce a trigger.
+pub fn finalize_dictation(cleaned: &str, settings: &Settings, snippets: &SnippetStore) -> String {
+    if !settings.snippets_enabled {
+        return cleaned.to_string();
+    }
+    crate::snippets::expand(cleaned, snippets)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +243,22 @@ mod tests {
     #[test]
     fn normalize_drops_punctuation_and_case() {
         assert_eq!(normalize("Hey, Shrimp!  Open  Safari."), "hey shrimp open safari");
+    }
+
+    #[test]
+    fn dictation_with_snippets_disabled_is_left_alone() {
+        let mut s = Settings::default();
+        s.snippets_enabled = false;
+        let mut snips = SnippetStore::default();
+        snips.add("my signature", "Adriel Reyes");
+        assert_eq!(finalize_dictation("send my signature", &s, &snips), "send my signature");
+    }
+
+    #[test]
+    fn dictation_with_snippets_enabled_expands_them() {
+        let s = Settings::default();
+        let mut snips = SnippetStore::default();
+        snips.add("my signature", "Adriel Reyes");
+        assert_eq!(finalize_dictation("send my signature", &s, &snips), "send Adriel Reyes");
     }
 }
