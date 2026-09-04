@@ -17,6 +17,17 @@ import {
   askMeeting,
   askLibrary,
   draftFollowup,
+  generateStudyPlan,
+  cachedStudyPlan,
+  generateFlashcards,
+  cachedFlashcards,
+  generateQuiz,
+  cachedQuiz,
+  lastStudySettings,
+  listHomework,
+  addHomework,
+  setHomeworkDone,
+  deleteHomework,
   moveMeetingToFolder,
   listFolders,
   createFolder,
@@ -27,6 +38,11 @@ import {
   type Folder,
   type TranscriptLine,
   type Template,
+  type Difficulty,
+  type StudySettings,
+  type Flashcard,
+  type QuizQuestion,
+  type HomeworkItem,
   type LibraryAnswer,
 } from "./api";
 
@@ -52,7 +68,7 @@ function formatDate(iso: string): string {
   }
 }
 
-type DetailTab = "transcript" | "notes";
+type DetailTab = "transcript" | "notes" | "study" | "homework";
 
 const TEMPLATE_OPTIONS: { value: Template; label: string }[] = [
   { value: "general", label: "General" },
@@ -60,6 +76,12 @@ const TEMPLATE_OPTIONS: { value: Template; label: string }[] = [
   { value: "one_on_one", label: "1:1 Sync" },
   { value: "interview", label: "Interview" },
   { value: "lecture", label: "Lecture" },
+];
+
+const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
+  { value: "easy", label: "Easy" },
+  { value: "medium", label: "Medium" },
+  { value: "hard", label: "Hard" },
 ];
 
 export function LibraryPane() {
@@ -88,6 +110,33 @@ export function LibraryPane() {
   const [meetingQuestion, setMeetingQuestion] = useState("");
   const [meetingAnswer, setMeetingAnswer] = useState<string | null>(null);
   const [askingMeeting, setAskingMeeting] = useState(false);
+
+  // Study Hub state
+  const [studySubTab, setStudySubTab] = useState<"plan" | "flashcards" | "quiz">("plan");
+  const [studySettings, setStudySettings] = useState<StudySettings>({
+    count: 5,
+    difficulty: "medium",
+    topicFocus: "",
+  });
+  const [studyPlan, setStudyPlan] = useState<string | null>(null);
+  const [flashcards, setFlashcards] = useState<Flashcard[] | null>(null);
+  const [quiz, setQuiz] = useState<QuizQuestion[] | null>(null);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [generatingCards, setGeneratingCards] = useState(false);
+  const [generatingQuizState, setGeneratingQuizState] = useState(false);
+
+  // Flashcards interactive state
+  const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const [isCardFlipped, setIsCardFlipped] = useState(false);
+
+  // Quiz interactive state
+  const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
+
+  // Homework state
+  const [homeworkList, setHomeworkList] = useState<HomeworkItem[]>([]);
+  const [newHwTitle, setNewHwTitle] = useState("");
+  const [newHwDueDate, setNewHwDueDate] = useState("");
+  const [addingHw, setAddingHw] = useState(false);
 
   // Ask Library state
   const [showAskLibrary, setShowAskLibrary] = useState(false);
@@ -125,13 +174,19 @@ export function LibraryPane() {
     void loadAll();
   }, [searchQuery]);
 
-  // Load transcript segments and notes when selected meeting changes
+  // Load meeting data when selected meeting changes
   useEffect(() => {
     if (!selectedMeetingId) {
       setSegments([]);
       setNotesText("");
       setFollowupText(null);
       setMeetingAnswer(null);
+      setStudyPlan(null);
+      setFlashcards(null);
+      setQuiz(null);
+      setUserAnswers({});
+      setCurrentCardIndex(0);
+      setIsCardFlipped(false);
       return;
     }
 
@@ -142,12 +197,22 @@ export function LibraryPane() {
     if (m) setSelectedTemplate(m.template);
 
     run(async () => {
-      const [segs, notes] = await Promise.all([
+      const [segs, notes, plan, cards, qz, lastSet, hw] = await Promise.all([
         getMeetingSegments(selectedMeetingId),
         getMeetingTypedNotes(selectedMeetingId),
+        cachedStudyPlan(selectedMeetingId),
+        cachedFlashcards(selectedMeetingId),
+        cachedQuiz(selectedMeetingId),
+        lastStudySettings(selectedMeetingId),
+        listHomework(),
       ]);
       setSegments(segs);
       setNotesText(notes ?? "");
+      setStudyPlan(plan);
+      setFlashcards(cards);
+      setQuiz(qz);
+      if (lastSet) setStudySettings(lastSet);
+      setHomeworkList(hw);
     }).finally(() => {
       setLoadingSegments(false);
       setLoadingNotes(false);
@@ -279,6 +344,72 @@ export function LibraryPane() {
     setDraftingFollowup(false);
   };
 
+  // Study actions (serving cache first, force parameter for re-generation)
+  const handleGenerateStudyPlan = async (force: boolean) => {
+    if (!selectedMeeting || generatingPlan) return;
+    setGeneratingPlan(true);
+    await run(async () => {
+      const plan = await generateStudyPlan(selectedMeeting.id, studySettings, force);
+      setStudyPlan(plan);
+    });
+    setGeneratingPlan(false);
+  };
+
+  const handleGenerateFlashcards = async (force: boolean) => {
+    if (!selectedMeeting || generatingCards) return;
+    setGeneratingCards(true);
+    await run(async () => {
+      const cards = await generateFlashcards(selectedMeeting.id, studySettings, force);
+      setFlashcards(cards);
+      setCurrentCardIndex(0);
+      setIsCardFlipped(false);
+    });
+    setGeneratingCards(false);
+  };
+
+  const handleGenerateQuiz = async (force: boolean) => {
+    if (!selectedMeeting || generatingQuizState) return;
+    setGeneratingQuizState(true);
+    await run(async () => {
+      const qz = await generateQuiz(selectedMeeting.id, studySettings, force);
+      setQuiz(qz);
+      setUserAnswers({});
+    });
+    setGeneratingQuizState(false);
+  };
+
+  // Homework actions
+  const handleAddHomework = async () => {
+    const t = newHwTitle.trim();
+    if (!t || !selectedMeeting) return;
+    const due =
+      newHwDueDate.trim() ||
+      new Date(Date.now() + 86400 * 1000 * 3).toISOString().slice(0, 10);
+    await run(async () => {
+      const item = await addHomework(selectedMeeting.id, t, due);
+      setHomeworkList((prev) => [...prev, item]);
+      setNewHwTitle("");
+      setNewHwDueDate("");
+      setAddingHw(false);
+    });
+  };
+
+  const handleToggleHomework = async (id: string, done: boolean) => {
+    await run(async () => {
+      await setHomeworkDone(id, done);
+      setHomeworkList((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, done } : item))
+      );
+    });
+  };
+
+  const handleDeleteHomework = async (id: string) => {
+    await run(async () => {
+      await deleteHomework(id);
+      setHomeworkList((prev) => prev.filter((item) => item.id !== id));
+    });
+  };
+
   // Ask Library action
   const handleAskLibrary = async () => {
     const q = libraryQuestion.trim();
@@ -350,7 +481,7 @@ export function LibraryPane() {
           marginBottom: 20,
         }}
       >
-        <PageTitle sub="Browse past recordings, inspect transcripts, organize into folders, and query notes.">
+        <PageTitle sub="Browse past recordings, inspect transcripts, generate study materials, and organize notes.">
           Meeting Library
         </PageTitle>
 
@@ -860,6 +991,8 @@ export function LibraryPane() {
                     options={[
                       { value: "transcript", label: "Transcript" },
                       { value: "notes", label: "Notes & Query" },
+                      { value: "study", label: "Study Hub" },
+                      { value: "homework", label: "Action Items" },
                     ]}
                     value={detailTab}
                     onChange={setDetailTab}
@@ -1202,6 +1335,479 @@ export function LibraryPane() {
                     )}
                   </Card>
                 </div>
+              )}
+
+              {/* Tab 3: Study Hub */}
+              {detailTab === "study" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* Study Settings Form Card */}
+                  <Card pad={18}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                          Study Settings
+                        </div>
+                        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                          Tune the difficulty, scope, and quantity for study materials.
+                        </div>
+                      </div>
+
+                      <Segmented<"plan" | "flashcards" | "quiz">
+                        options={[
+                          { value: "plan", label: "Study Plan" },
+                          { value: "flashcards", label: "Flashcards" },
+                          { value: "quiz", label: "Quiz" },
+                        ]}
+                        value={studySubTab}
+                        onChange={setStudySubTab}
+                      />
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 8 }}>
+                      <div>
+                        <label style={{ fontSize: 12, color: theme.textMuted, display: "block", marginBottom: 5 }}>
+                          Item Count (3 - 30)
+                        </label>
+                        <input
+                          type="number"
+                          min={3}
+                          max={30}
+                          value={studySettings.count}
+                          onChange={(e) =>
+                            setStudySettings({
+                              ...studySettings,
+                              count: Math.min(30, Math.max(3, Number(e.target.value) || 3)),
+                            })
+                          }
+                          style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: 12, color: theme.textMuted, display: "block", marginBottom: 5 }}>
+                          Difficulty Level
+                        </label>
+                        <Segmented<Difficulty>
+                          options={DIFFICULTY_OPTIONS}
+                          value={studySettings.difficulty}
+                          onChange={(diff) => setStudySettings({ ...studySettings, difficulty: diff })}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: 12, color: theme.textMuted, display: "block", marginBottom: 5 }}>
+                          Topic Focus <span style={{ color: theme.textFaint }}>(blank for all)</span>
+                        </label>
+                        <input
+                          value={studySettings.topicFocus}
+                          onChange={(e) =>
+                            setStudySettings({ ...studySettings, topicFocus: e.target.value })
+                          }
+                          placeholder="e.g. key deadlines"
+                          style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Sub-tab: Study Plan */}
+                  {studySubTab === "plan" && (
+                    <Card pad={18}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                          Comprehensive Study Plan
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="accent"
+                          onClick={() => void handleGenerateStudyPlan(Boolean(studyPlan))}
+                          disabled={generatingPlan}
+                        >
+                          {generatingPlan
+                            ? "Generating..."
+                            : studyPlan
+                              ? "Regenerate study plan"
+                              : "Generate study plan"}
+                        </Button>
+                      </div>
+
+                      {generatingPlan ? (
+                        <div style={{ padding: 28, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          Analyzing transcript and compiling study roadmap...
+                        </div>
+                      ) : studyPlan ? (
+                        <div
+                          style={{
+                            background: theme.cardBgSubtle,
+                            border: `1px solid ${theme.border}`,
+                            borderRadius: 10,
+                            padding: "14px 16px",
+                            fontSize: 13.5,
+                            lineHeight: 1.6,
+                            color: theme.textBody,
+                            whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {studyPlan}
+                        </div>
+                      ) : (
+                        <div style={{ padding: 36, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          No study plan cached for this meeting. Click 'Generate study plan' to create one.
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Sub-tab: Flashcards */}
+                  {studySubTab === "flashcards" && (
+                    <Card pad={18}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                          Interactive Flashcards
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="accent"
+                          onClick={() => void handleGenerateFlashcards(Boolean(flashcards))}
+                          disabled={generatingCards}
+                        >
+                          {generatingCards
+                            ? "Generating..."
+                            : flashcards
+                              ? "Regenerate cards"
+                              : "Generate flashcards"}
+                        </Button>
+                      </div>
+
+                      {generatingCards ? (
+                        <div style={{ padding: 28, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          Extracting key concepts into flashcards...
+                        </div>
+                      ) : flashcards && flashcards.length > 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: theme.textMuted }}>
+                            <span>
+                              Card {currentCardIndex + 1} of {flashcards.length}
+                            </span>
+                            <span style={{ fontStyle: "italic" }}>
+                              {isCardFlipped ? "Answer side" : "Prompt side (click Flip to reveal)"}
+                            </span>
+                          </div>
+
+                          <div
+                            onClick={() => setIsCardFlipped((f) => !f)}
+                            style={{
+                              background: theme.cardBgSubtle,
+                              border: `1px solid ${theme.accentSoftBorder}`,
+                              borderRadius: 12,
+                              padding: "36px 24px",
+                              textAlign: "center",
+                              cursor: "pointer",
+                              minHeight: 140,
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: theme.shadow,
+                              transition: "all 150ms ease",
+                            }}
+                          >
+                            <div style={{ fontSize: 12, color: theme.accentDeep, fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
+                              {isCardFlipped ? "Answer" : "Question"}
+                            </div>
+                            <div style={{ fontSize: 15, fontWeight: 600, color: theme.textStrong, lineHeight: 1.5, maxWidth: 480 }}>
+                              {isCardFlipped
+                                ? flashcards[currentCardIndex].back
+                                : flashcards[currentCardIndex].front}
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setCurrentCardIndex((i) => Math.max(0, i - 1));
+                                setIsCardFlipped(false);
+                              }}
+                              disabled={currentCardIndex === 0}
+                            >
+                              ← Previous
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="dark"
+                              onClick={() => setIsCardFlipped((f) => !f)}
+                            >
+                              Flip Card
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setCurrentCardIndex((i) => Math.min(flashcards.length - 1, i + 1));
+                                setIsCardFlipped(false);
+                              }}
+                              disabled={currentCardIndex === flashcards.length - 1}
+                            >
+                              Next →
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ padding: 36, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          No flashcards cached for this meeting. Click 'Generate flashcards' to extract cards.
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Sub-tab: Quiz */}
+                  {studySubTab === "quiz" && (
+                    <Card pad={18}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                            Comprehension Quiz
+                          </div>
+                          {quiz && quiz.length > 0 && (
+                            <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                              Score: {Object.entries(userAnswers).filter(([qIdx, optIdx]) => quiz[Number(qIdx)].correct_index === optIdx).length} / {quiz.length} answered correctly
+                            </div>
+                          )}
+                        </div>
+
+                        <Button
+                          size="sm"
+                          variant="accent"
+                          onClick={() => void handleGenerateQuiz(Boolean(quiz))}
+                          disabled={generatingQuizState}
+                        >
+                          {generatingQuizState
+                            ? "Generating..."
+                            : quiz
+                              ? "Regenerate quiz"
+                              : "Generate quiz"}
+                        </Button>
+                      </div>
+
+                      {generatingQuizState ? (
+                        <div style={{ padding: 28, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          Formulating comprehension quiz questions...
+                        </div>
+                      ) : quiz && quiz.length > 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                          {quiz.map((q, qIdx) => {
+                            const selectedOption = userAnswers[qIdx];
+                            const isAnswered = selectedOption !== undefined;
+                            return (
+                              <div
+                                key={qIdx}
+                                style={{
+                                  background: theme.cardBgSubtle,
+                                  border: `1px solid ${theme.border}`,
+                                  borderRadius: 10,
+                                  padding: "14px 16px",
+                                }}
+                              >
+                                <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong, marginBottom: 10 }}>
+                                  {qIdx + 1}. {q.question}
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                  {q.options.map((opt, optIdx) => {
+                                    const isSelected = selectedOption === optIdx;
+                                    const isCorrect = q.correct_index === optIdx;
+                                    let optionBg: string = theme.cardBg;
+                                    let optionBorder: string = theme.border;
+
+                                    if (isAnswered) {
+                                      if (isCorrect) {
+                                        optionBg = "rgba(74, 222, 128, 0.12)";
+                                        optionBorder = palette.success;
+                                      } else if (isSelected) {
+                                        optionBg = "rgba(248, 113, 113, 0.12)";
+                                        optionBorder = palette.error;
+                                      }
+                                    }
+
+                                    return (
+                                      <button
+                                        key={optIdx}
+                                        type="button"
+                                        onClick={() => {
+                                          if (!isAnswered) {
+                                            setUserAnswers({ ...userAnswers, [qIdx]: optIdx });
+                                          }
+                                        }}
+                                        style={{
+                                          textAlign: "left",
+                                          padding: "8px 12px",
+                                          borderRadius: 8,
+                                          background: optionBg,
+                                          border: `1px solid ${optionBorder}`,
+                                          cursor: isAnswered ? "default" : "pointer",
+                                          fontFamily: font.ui,
+                                          fontSize: 13,
+                                          color: theme.textBody,
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "space-between",
+                                        }}
+                                      >
+                                        <span>{opt}</span>
+                                        {isAnswered && isCorrect && (
+                                          <span style={{ color: palette.success, fontWeight: 600, fontSize: 12 }}>
+                                            ✓ Correct
+                                          </span>
+                                        )}
+                                        {isAnswered && isSelected && !isCorrect && (
+                                          <span style={{ color: palette.error, fontWeight: 600, fontSize: 12 }}>
+                                            ✕ Incorrect
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ padding: 36, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          No quiz cached for this meeting. Click 'Generate quiz' to test retention.
+                        </div>
+                      )}
+                    </Card>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 4: Homework & Action Items */}
+              {detailTab === "homework" && (
+                <Card pad={18}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                        Action Items & Homework
+                      </div>
+                      <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                        Track assigned tasks and deliverables resulting from this session.
+                      </div>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="accent"
+                      onClick={() => setAddingHw((v) => !v)}
+                    >
+                      <Icon name="plus" size={14} style={{ color: "#fff" }} />
+                      Add action item
+                    </Button>
+                  </div>
+
+                  {addingHw && (
+                    <div
+                      style={{
+                        marginBottom: 16,
+                        padding: 12,
+                        background: theme.cardBgSubtle,
+                        border: `1px solid ${theme.accentSoftBorder}`,
+                        borderRadius: 8,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        value={newHwTitle}
+                        onChange={(e) => setNewHwTitle(e.target.value)}
+                        placeholder="Action item description (e.g. Submit draft proposal)"
+                        style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                      />
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <label style={{ fontSize: 12, color: theme.textMuted }}>Due Date:</label>
+                        <input
+                          type="date"
+                          value={newHwDueDate}
+                          onChange={(e) => setNewHwDueDate(e.target.value)}
+                          style={{ ...inputStyle, flex: 1 }}
+                        />
+                        <Button size="sm" variant="accent" onClick={() => void handleAddHomework()}>
+                          Save
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setAddingHw(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {homeworkList.length === 0 ? (
+                    <div style={{ padding: 36, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                      No action items logged yet. Add one to track follow-ups.
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {homeworkList.map((hw) => (
+                        <div
+                          key={hw.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "10px 12px",
+                            background: theme.cardBgSubtle,
+                            border: `1px solid ${theme.border}`,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                            <input
+                              type="checkbox"
+                              checked={hw.done}
+                              onChange={(e) => void handleToggleHomework(hw.id, e.target.checked)}
+                              style={{ cursor: "pointer", width: 16, height: 16 }}
+                            />
+                            <div style={{ display: "flex", flexDirection: "column" }}>
+                              <span
+                                style={{
+                                  fontSize: 13.5,
+                                  fontWeight: 500,
+                                  color: hw.done ? theme.textMuted : theme.textStrong,
+                                  textDecoration: hw.done ? "line-through" : "none",
+                                }}
+                              >
+                                {hw.title}
+                              </span>
+                              {hw.due_date && (
+                                <span style={{ fontSize: 11.5, color: theme.textFaint }}>
+                                  Due: {hw.due_date}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteHomework(hw.id)}
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              color: theme.textMuted,
+                              padding: 4,
+                            }}
+                            title="Delete action item"
+                          >
+                            <Icon name="trash" size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
               )}
             </div>
           ) : (
