@@ -26,3 +26,5 @@ src-tauri/gen/
 .env.*
 *.pem
 build.log
+ggml-*.bin
+*.gguf

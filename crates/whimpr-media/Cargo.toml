@@ -1,0 +1,12 @@
+[package]
+name = "whimpr-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+reqwest = { version = "0.12", features = ["blocking", "stream"] }
+tokio = { version = "1", features = ["rt", "macros", "fs", "io-util"] }
+futures-util = "0.3"

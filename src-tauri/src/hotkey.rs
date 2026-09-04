@@ -137,25 +137,7 @@ mod imp {
         text: String,
     }
 
-    /// The whisper ASR model to load: prefer the most accurate one present, in
-    /// descending quality order, falling back to the small base model. Bigger
-    /// English models mis-hear names/technical terms far less (and better ASR means
-    /// less for cleanup and the dictionary to fix downstream).
-    fn model_path() -> PathBuf {
-        let dir = support_dir().join("models");
-        for name in [
-            "ggml-large-v3-turbo.bin",
-            "ggml-medium.en.bin",
-            "ggml-small.en.bin",
-            "ggml-base.en.bin",
-        ] {
-            let p = dir.join(name);
-            if p.exists() {
-                return p;
-            }
-        }
-        dir.join("ggml-base.en.bin")
-    }
+
 
     fn support_dir() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_default();
@@ -1004,14 +986,20 @@ mod imp {
             TRIGGER_MODE_IS_TOGGLE.store(settings.trigger_mode == "toggle", std::sync::atomic::Ordering::SeqCst);
         }
 
+        // Load settings + dictionary, and build cloud providers from stored keys.
+        let settings = whimpr_core::Settings::load(&settings_path());
+
         // Load the speech-to-text model off the main thread (it takes ~1s).
-        std::thread::spawn(|| {
-            let path = model_path();
-            if !path.exists() {
-                eprintln!("[whimpr] ASR model not found at {}", path.display());
-                ASR_MODEL_MISSING.store(true, Ordering::SeqCst);
-                return;
-            }
+        let whisper_model = settings.whisper_model.clone();
+        std::thread::spawn(move || {
+            let path = match whimpr_media::model::ensure_whisper_model(&whisper_model) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[whimpr] ASR model ensure failed: {e}");
+                    ASR_MODEL_MISSING.store(true, Ordering::SeqCst);
+                    return;
+                }
+            };
             match whimpr_asr::WhisperEngine::load(&path) {
                 Ok(engine) => {
                     let _ = ASR.set(Arc::new(engine));
@@ -1024,8 +1012,6 @@ mod imp {
             }
         });
 
-        // Load settings + dictionary, and build cloud providers from stored keys.
-        let settings = whimpr_core::Settings::load(&settings_path());
         let dict = whimpr_core::DictionaryStore::load(&dict_path());
         eprintln!(
             "[whimpr] cleanup mode: {:?}, level: {:?}",
