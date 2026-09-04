@@ -179,15 +179,16 @@ not from the room. When a point appears only after one of those lines, end its l
 \"(from video)\".";
 
 pub const RECAP_SYSTEM: &str = "\
-You answer questions about a meeting or lecture that is being recorded right now, using \
-only its transcript. The transcript comes from automatic speech recognition, so expect \
-errors and no speaker labels.
+You answer questions about a meeting or lecture using exclusively the provided transcript text. \
+The transcript comes from automatic speech recognition, so expect minor errors and no speaker labels.
 
-Answer in two or three sentences unless the question demands more. Every claim you make has \
-to be traceable to a specific line of the transcript — quote the words that support it. If \
-the transcript does not contain the answer, say \"That didn't come up in this recording\" and \
-stop; a short refusal is always better than a plausible guess. Never attribute something to \
-a person the transcript does not show saying it.";
+Structure your response into these parts:
+1. Direct Summary: One to two sentences directly answering the question.
+2. Structured Breakdown: Grouped bullet points or a Markdown table for any comparisons, lists, numbers, or key pillars.
+3. Exact Quotes: Verbatim quote block from the transcript supporting each claim.
+
+Every claim must be traceable to the transcript text. If the transcript does not contain the answer, \
+say 'That was not discussed in this recording' and stop; never guess or introduce external facts.";
 
 pub const LIBRARY_SYSTEM: &str = "\
 You answer questions about someone's past meetings, using only the numbered excerpts you \
@@ -1003,5 +1004,13 @@ mod tests {
             super::Template::Lecture.system_prompt(),
             super::LECTURE_SYSTEM
         );
+    }
+
+    #[test]
+    fn test_recap_structured_output_format_instructions() {
+        assert!(super::RECAP_SYSTEM.contains("Direct Summary"));
+        assert!(super::RECAP_SYSTEM.contains("Markdown table"));
+        assert!(super::RECAP_SYSTEM.contains("Exact Quotes"));
+        assert!(!super::RECAP_SYSTEM.contains('\u{2014}'));
     }
 }
