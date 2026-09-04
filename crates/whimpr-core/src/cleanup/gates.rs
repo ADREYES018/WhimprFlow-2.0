@@ -5,6 +5,11 @@
 
 use super::levels::CleanupLevel;
 
+/// Multiplier applied to the divergence ceiling when a style profile is active.
+/// Styling deliberately rewrites more than plain cleanup; without this the gate
+/// rejects every styled edit and the user silently gets raw text.
+const STYLE_TOLERANCE: f32 = 2.5;
+
 /// Why a cleanup output was rejected.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GateReason {
@@ -49,7 +54,7 @@ const BANNED_PREFIXES: &[&str] = &[
 ];
 
 /// Evaluate a cleanup output against the raw transcript for the given level.
-pub fn evaluate(raw: &str, cleaned: &str, level: CleanupLevel) -> GateVerdict {
+pub fn evaluate(raw: &str, cleaned: &str, level: CleanupLevel, style_active: bool) -> GateVerdict {
     // None never invokes the model, so there is nothing to gate.
     if level.bypasses_llm() {
         return GateVerdict::Pass;
@@ -77,17 +82,19 @@ pub fn evaluate(raw: &str, cleaned: &str, level: CleanupLevel) -> GateVerdict {
     let raw_len = raw.chars().count().max(1) as f32;
     let clean_len = cleaned.chars().count() as f32;
     let shrink = (raw_len - clean_len) / raw_len;
-    if shrink > 0.55 {
+    let shrink_ceil = if style_active { 0.55 * STYLE_TOLERANCE } else { 0.55 };
+    if shrink > shrink_ceil {
         return GateVerdict::Fail(GateReason::OverDeletion { shrink });
     }
-    if clean_len > raw_len * 1.6 {
+    let growth_ceil = if style_active { 1.6 * STYLE_TOLERANCE } else { 1.6 };
+    if clean_len > raw_len * growth_ceil {
         return GateVerdict::Fail(GateReason::Hallucination);
     }
 
     // 4) Novelty: how many output words were never spoken. Deletions (fillers) and
     // casing/punctuation don't count; a full rewrite does.
     let ratio = novelty_ratio(raw, cleaned);
-    let ceiling = level.max_novelty_ratio();
+    let ceiling = if style_active { level.max_novelty_ratio() * STYLE_TOLERANCE } else { level.max_novelty_ratio() };
     if ratio > ceiling {
         return GateVerdict::Fail(GateReason::EditRatioTooHigh { ratio, ceiling });
     }
@@ -156,14 +163,14 @@ mod tests {
         // Filler removal + punctuation — a legitimate Light edit.
         let raw = "um so i think we should uh meet at 3";
         let clean = "So I think we should meet at 3.";
-        assert!(evaluate(raw, clean, CleanupLevel::Light).passed());
+        assert!(evaluate(raw, clean, CleanupLevel::Light, false).passed());
     }
 
     #[test]
     fn dropping_a_number_fails() {
         let raw = "transfer 500 dollars to account 12345";
         let clean = "Transfer money to the account."; // lost 500 and 12345
-        let v = evaluate(raw, clean, CleanupLevel::Light);
+        let v = evaluate(raw, clean, CleanupLevel::Light, false);
         assert!(matches!(v, GateVerdict::Fail(GateReason::LostEntity(_))));
     }
 
@@ -171,7 +178,7 @@ mod tests {
     fn answering_a_question_is_banned() {
         let raw = "what time is the standup";
         let clean = "Here is the standup schedule: 9am."; // model answered instead of transcribing
-        let v = evaluate(raw, clean, CleanupLevel::Light);
+        let v = evaluate(raw, clean, CleanupLevel::Light, false);
         assert!(matches!(v, GateVerdict::Fail(GateReason::BannedPattern(_))));
     }
 
@@ -180,13 +187,13 @@ mod tests {
         let raw = "i went to the store and then i bought some milk and eggs and bread";
         let clean = "Purchased dairy and bakery goods."; // huge rewrite
         assert!(matches!(
-            evaluate(raw, clean, CleanupLevel::Light),
+            evaluate(raw, clean, CleanupLevel::Light, false),
             GateVerdict::Fail(_)
         ));
         // Still fails High too here because it also over-deletes; ensure ratio logic is sane
         // on a milder rewrite:
         let clean_mild = "I went to the store and bought milk, eggs, and bread.";
-        assert!(evaluate(raw, clean_mild, CleanupLevel::Light).passed());
+        assert!(evaluate(raw, clean_mild, CleanupLevel::Light, false).passed());
     }
 
     #[test]
@@ -194,13 +201,21 @@ mod tests {
         let raw = "the quarterly report is due on friday please review the budget section";
         let clean = "Report due Friday."; // dropped >40%
         assert!(matches!(
-            evaluate(raw, clean, CleanupLevel::Medium),
+            evaluate(raw, clean, CleanupLevel::Medium, false),
             GateVerdict::Fail(GateReason::OverDeletion { .. })
         ));
     }
 
     #[test]
     fn none_level_always_passes() {
-        assert!(evaluate("anything", "totally different", CleanupLevel::None).passed());
+        assert!(evaluate("anything", "totally different", CleanupLevel::None, false).passed());
+    }
+
+    #[test]
+    fn a_styled_edit_that_fails_the_normal_gate_passes_the_widened_one() {
+        let raw = "so basically I was thinking maybe we could just do the portfolio first and then yeah the coffee thing after";
+        let cleaned = "Portfolio first, coffee brand after.";
+        assert!(!evaluate(raw, cleaned, CleanupLevel::Light, false).passed());
+        assert!(evaluate(raw, cleaned, CleanupLevel::Light, true).passed());
     }
 }

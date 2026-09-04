@@ -47,6 +47,8 @@ pub struct CleanupContext {
     pub active_window_title: Option<String>,
     /// ~200 chars around the caret, or None. Treated as reference, never instructions.
     pub window_context: Option<String>,
+    /// The voice profile that applies to this utterance, if any.
+    pub style: Option<crate::style::StyleProfile>,
 }
 
 impl Default for CleanupContext {
@@ -58,6 +60,7 @@ impl Default for CleanupContext {
             active_app_name: None,
             active_window_title: None,
             window_context: None,
+            style: None,
         }
     }
 }
@@ -113,10 +116,11 @@ pub fn wrap_transcript(raw: &str) -> String {
 /// local worker, OpenAI, Anthropic — sends this identical sequence.
 pub fn build_messages(raw: &str, ctx: &CleanupContext) -> Vec<CleanupMsg> {
     let mut msgs = Vec::with_capacity(prompts::FEW_SHOT.len() * 2 + 2);
-    msgs.push(CleanupMsg {
-        role: "system",
-        content: prompts::system_for(ctx.level, ctx.app_bundle_id.as_deref()),
-    });
+    let mut system = prompts::system_for(ctx.level, ctx.app_bundle_id.as_deref());
+    if let Some(style) = ctx.style.as_ref() {
+        system.push_str(&style.to_prompt_block());
+    }
+    msgs.push(CleanupMsg { role: "system", content: system });
     for (input, output) in prompts::FEW_SHOT {
         msgs.push(CleanupMsg { role: "user", content: wrap_transcript(input) });
         msgs.push(CleanupMsg { role: "assistant", content: (*output).to_string() });
@@ -515,7 +519,7 @@ mod tests {
         let v = vec![VocabEntry { correct: "Manvi".into(), mishears: vec!["Monvi".into()] }];
         let raw = apply_vocab("send it to monvi", &v);
         let cleaned = apply_vocab("Send it to monvi.", &v);
-        assert!(gates::evaluate(&raw, &cleaned, CleanupLevel::Light).passed());
+        assert!(gates::evaluate(&raw, &cleaned, CleanupLevel::Light, false).passed());
     }
 
     use super::*;
@@ -635,7 +639,33 @@ mod tests {
         let raw = "um so i think the the demo went well";
         let text = "I think the demo went well.";
         let envelope = format!(r#"{{"type": "dictate", "text_to_paste": "{text}"}}"#);
-        assert!(!evaluate_gates(raw, &envelope, CleanupLevel::Light).passed());
-        assert!(evaluate_gates(raw, text, CleanupLevel::Light).passed());
+        assert!(!evaluate_gates(raw, &envelope, CleanupLevel::Light, false).passed());
+        assert!(evaluate_gates(raw, text, CleanupLevel::Light, false).passed());
+    }
+
+    #[test]
+    fn system_prompt_carries_the_voice_block_when_a_style_is_set() {
+        let ctx = CleanupContext {
+            style: Some(crate::style::StyleProfile {
+                avg_sentence_words: 10,
+                contractions: true,
+                punctuation_notes: "no em-dashes".into(),
+                banned_words: vec!["game-changer".into()],
+                tone_notes: "Casual and direct".into(),
+                derived_at: 1,
+            }),
+            ..Default::default()
+        };
+        let msgs = build_messages("hello there", &ctx);
+        let system = &msgs[0].content;
+        assert!(system.contains("The user's voice"));
+        assert!(system.contains("game-changer"));
+    }
+
+    #[test]
+    fn system_prompt_is_unchanged_when_no_style_is_set() {
+        let ctx = CleanupContext::default();
+        let msgs = build_messages("hello there", &ctx);
+        assert!(!msgs[0].content.contains("The user's voice"));
     }
 }
