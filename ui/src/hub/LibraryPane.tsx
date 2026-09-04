@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { font, palette } from "../tokens/values";
 import { theme } from "./theme";
-import { Button, Card, Dot, PageTitle } from "./ui";
+import { Button, Card, Dot, PageTitle, Segmented } from "./ui";
 import { ActionError, useAction } from "./useAction";
 import { Icon } from "./icons";
 import {
@@ -11,6 +11,12 @@ import {
   renameMeeting,
   exportMeeting,
   getMeetingSegments,
+  getMeetingTypedNotes,
+  writeNotes,
+  saveNotes,
+  askMeeting,
+  askLibrary,
+  draftFollowup,
   moveMeetingToFolder,
   listFolders,
   createFolder,
@@ -20,6 +26,8 @@ import {
   type Meeting,
   type Folder,
   type TranscriptLine,
+  type Template,
+  type LibraryAnswer,
 } from "./api";
 
 function formatDurationSecs(secs: number): string {
@@ -44,6 +52,16 @@ function formatDate(iso: string): string {
   }
 }
 
+type DetailTab = "transcript" | "notes";
+
+const TEMPLATE_OPTIONS: { value: Template; label: string }[] = [
+  { value: "general", label: "General" },
+  { value: "standup", label: "Standup" },
+  { value: "one_on_one", label: "1:1 Sync" },
+  { value: "interview", label: "Interview" },
+  { value: "lecture", label: "Lecture" },
+];
+
 export function LibraryPane() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -51,9 +69,31 @@ export function LibraryPane() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
+  // Detail view tabs
+  const [detailTab, setDetailTab] = useState<DetailTab>("transcript");
+
   // Transcript state for detail view
   const [segments, setSegments] = useState<TranscriptLine[]>([]);
   const [loadingSegments, setLoadingSegments] = useState(false);
+
+  // Notes state for detail view
+  const [notesText, setNotesText] = useState("");
+  const [loadingNotes, setLoadingNotes] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [generatingNotes, setGeneratingNotes] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<Template>("general");
+  const [notesSaveNotice, setNotesSaveNotice] = useState<string | null>(null);
+  const [followupText, setFollowupText] = useState<string | null>(null);
+  const [draftingFollowup, setDraftingFollowup] = useState(false);
+  const [meetingQuestion, setMeetingQuestion] = useState("");
+  const [meetingAnswer, setMeetingAnswer] = useState<string | null>(null);
+  const [askingMeeting, setAskingMeeting] = useState(false);
+
+  // Ask Library state
+  const [showAskLibrary, setShowAskLibrary] = useState(false);
+  const [libraryQuestion, setLibraryQuestion] = useState("");
+  const [libraryAnswer, setLibraryAnswer] = useState<LibraryAnswer | null>(null);
+  const [askingLibrary, setAskingLibrary] = useState(false);
 
   // Folder creation / renaming
   const [newFolderName, setNewFolderName] = useState("");
@@ -85,17 +125,33 @@ export function LibraryPane() {
     void loadAll();
   }, [searchQuery]);
 
-  // Load transcript segments when selected meeting changes
+  // Load transcript segments and notes when selected meeting changes
   useEffect(() => {
     if (!selectedMeetingId) {
       setSegments([]);
+      setNotesText("");
+      setFollowupText(null);
+      setMeetingAnswer(null);
       return;
     }
+
     setLoadingSegments(true);
+    setLoadingNotes(true);
+
+    const m = meetings.find((item) => item.id === selectedMeetingId);
+    if (m) setSelectedTemplate(m.template);
+
     run(async () => {
-      const segs = await getMeetingSegments(selectedMeetingId);
+      const [segs, notes] = await Promise.all([
+        getMeetingSegments(selectedMeetingId),
+        getMeetingTypedNotes(selectedMeetingId),
+      ]);
       setSegments(segs);
-    }).finally(() => setLoadingSegments(false));
+      setNotesText(notes ?? "");
+    }).finally(() => {
+      setLoadingSegments(false);
+      setLoadingNotes(false);
+    });
   }, [selectedMeetingId]);
 
   const selectedMeeting = meetings.find((m) => m.id === selectedMeetingId);
@@ -177,6 +233,64 @@ export function LibraryPane() {
     });
   };
 
+  // Notes actions
+  const handleGenerateNotes = async (force: boolean) => {
+    if (!selectedMeeting || generatingNotes) return;
+    setGeneratingNotes(true);
+    setNotesSaveNotice(null);
+    await run(async () => {
+      const generated = await writeNotes(selectedMeeting.id, selectedTemplate, force);
+      setNotesText(generated);
+      await loadAll();
+    });
+    setGeneratingNotes(false);
+  };
+
+  const handleSaveNotes = async () => {
+    if (!selectedMeeting || savingNotes) return;
+    setSavingNotes(true);
+    setNotesSaveNotice(null);
+    await run(async () => {
+      await saveNotes(selectedMeeting.title, notesText);
+      setNotesSaveNotice("Notes saved.");
+      await loadAll();
+    });
+    setSavingNotes(false);
+  };
+
+  const handleAskMeeting = async () => {
+    const q = meetingQuestion.trim();
+    if (!q || askingMeeting || !selectedMeeting) return;
+    setAskingMeeting(true);
+    await run(async () => {
+      const ans = await askMeeting(selectedMeeting.id, q);
+      setMeetingAnswer(ans);
+    });
+    setAskingMeeting(false);
+  };
+
+  const handleDraftFollowup = async () => {
+    if (!selectedMeeting || draftingFollowup) return;
+    setDraftingFollowup(true);
+    await run(async () => {
+      const draft = await draftFollowup(selectedMeeting.id);
+      setFollowupText(draft);
+    });
+    setDraftingFollowup(false);
+  };
+
+  // Ask Library action
+  const handleAskLibrary = async () => {
+    const q = libraryQuestion.trim();
+    if (!q || askingLibrary) return;
+    setAskingLibrary(true);
+    await run(async () => {
+      const ans = await askLibrary(q);
+      setLibraryAnswer(ans);
+    });
+    setAskingLibrary(false);
+  };
+
   // Filter meetings by selected folder
   const filteredMeetings = meetings.filter((m) => {
     if (selectedFolder === "__all__") return true;
@@ -236,11 +350,19 @@ export function LibraryPane() {
           marginBottom: 20,
         }}
       >
-        <PageTitle sub="Browse past recordings, inspect transcripts, organize into folders, and export notes.">
+        <PageTitle sub="Browse past recordings, inspect transcripts, organize into folders, and query notes.">
           Meeting Library
         </PageTitle>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Button
+            size="sm"
+            variant={showAskLibrary ? "accent" : "ghost"}
+            onClick={() => setShowAskLibrary((v) => !v)}
+          >
+            Ask the Library
+          </Button>
+
           <div
             style={{
               display: "flex",
@@ -271,6 +393,102 @@ export function LibraryPane() {
           </div>
         </div>
       </div>
+
+      {/* Ask the Library Drawer */}
+      {showAskLibrary && (
+        <Card pad={18} style={{ marginBottom: 20, borderColor: theme.accentSoftBorder }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+              Ask the Library (Cross-Meeting Query)
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAskLibrary(false)}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: theme.textMuted,
+                cursor: "pointer",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ fontSize: 12.5, color: theme.textMuted, marginBottom: 12 }}>
+            Search for decisions, discussions, or topics across all recorded transcripts in your library.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: libraryAnswer ? 12 : 0 }}>
+            <input
+              value={libraryQuestion}
+              onChange={(e) => setLibraryQuestion(e.target.value)}
+              placeholder="e.g. When did we discuss onboarding and what was decided?"
+              style={{ ...inputStyle, flex: 1, padding: "8px 12px" }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleAskLibrary();
+                }
+              }}
+            />
+            <Button
+              variant="dark"
+              onClick={() => void handleAskLibrary()}
+              disabled={askingLibrary || !libraryQuestion.trim()}
+            >
+              {askingLibrary ? "Searching..." : "Search Library"}
+            </Button>
+          </div>
+
+          {libraryAnswer && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "12px 14px",
+                background: theme.cardBgSubtle,
+                border: `1px solid ${theme.border}`,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.textBody, whiteSpace: "pre-wrap", marginBottom: 12 }}>
+                {libraryAnswer.answer}
+              </div>
+
+              {libraryAnswer.sources.length > 0 && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>
+                    Sources Referenced:
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {libraryAnswer.sources.map((src) => (
+                      <button
+                        key={src.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMeetingId(src.id);
+                          setShowAskLibrary(false);
+                        }}
+                        style={{
+                          border: `1px solid ${theme.border}`,
+                          background: theme.cardBg,
+                          borderRadius: 6,
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          color: theme.accentDeep,
+                          cursor: "pointer",
+                          fontFamily: font.ui,
+                          fontWeight: 500,
+                        }}
+                      >
+                        {src.title} ({formatDate(src.started_at)})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Main Library Layout: Folder sidebar + List or Detail view */}
       <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 20 }}>
@@ -535,7 +753,7 @@ export function LibraryPane() {
 
                   <div style={{ display: "flex", gap: 8 }}>
                     <Button size="sm" variant="ghost" onClick={() => void handleExportMeeting(selectedMeeting.id)}>
-                      Export transcript
+                      Export meeting
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => void handleDeleteMeeting(selectedMeeting.id)}>
                       Delete
@@ -615,7 +833,6 @@ export function LibraryPane() {
                       >
                         Template: {selectedMeeting.template}
                       </span>
-                      {/* Move to folder selector */}
                       <select
                         value={selectedMeeting.folder ?? ""}
                         onChange={(e) => void handleMoveMeeting(selectedMeeting.id, e.target.value ? e.target.value : null)}
@@ -635,6 +852,18 @@ export function LibraryPane() {
                       </select>
                     </div>
                   </div>
+                </div>
+
+                {/* View switcher tabs */}
+                <div style={{ marginTop: 16 }}>
+                  <Segmented<DetailTab>
+                    options={[
+                      { value: "transcript", label: "Transcript" },
+                      { value: "notes", label: "Notes & Query" },
+                    ]}
+                    value={detailTab}
+                    onChange={setDetailTab}
+                  />
                 </div>
               </Card>
 
@@ -674,69 +903,306 @@ export function LibraryPane() {
                 </Card>
               )}
 
-              {/* Transcript Segments Card */}
-              <Card pad={18}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong, marginBottom: 12 }}>
-                  Meeting Transcript
-                </div>
+              {/* Tab 1: Transcript View */}
+              {detailTab === "transcript" && (
+                <Card pad={18}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong, marginBottom: 12 }}>
+                    Meeting Transcript
+                  </div>
 
-                {loadingSegments ? (
-                  <div style={{ padding: 24, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
-                    Loading transcript segments...
-                  </div>
-                ) : segments.length === 0 ? (
-                  <div style={{ padding: 32, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
-                    {selectedMeeting.transcribed
-                      ? "No transcript lines found for this meeting."
-                      : "Transcript is not available yet. Complete transcription to view segments."}
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                      maxHeight: 480,
-                      overflowY: "auto",
-                      paddingRight: 6,
-                    }}
-                  >
-                    {segments.map((seg, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          display: "flex",
-                          gap: 12,
-                          fontSize: 13.5,
-                          lineHeight: 1.55,
-                          padding: "6px 0",
-                          borderBottom: idx < segments.length - 1 ? `1px solid ${theme.border}` : "none",
-                        }}
-                      >
-                        <span
+                  {loadingSegments ? (
+                    <div style={{ padding: 24, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                      Loading transcript segments...
+                    </div>
+                  ) : segments.length === 0 ? (
+                    <div style={{ padding: 32, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                      {selectedMeeting.transcribed
+                        ? "No transcript lines found for this meeting."
+                        : "Transcript is not available yet. Complete transcription to view segments."}
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                        maxHeight: 480,
+                        overflowY: "auto",
+                        paddingRight: 6,
+                      }}
+                    >
+                      {segments.map((seg, idx) => (
+                        <div
+                          key={idx}
                           style={{
-                            fontFamily: font.mono,
-                            fontSize: 11.5,
-                            color: theme.textFaint,
-                            flex: "0 0 44px",
-                            paddingTop: 2,
+                            display: "flex",
+                            gap: 12,
+                            fontSize: 13.5,
+                            lineHeight: 1.55,
+                            padding: "6px 0",
+                            borderBottom: idx < segments.length - 1 ? `1px solid ${theme.border}` : "none",
                           }}
                         >
-                          {seg.at}
-                        </span>
-                        <div style={{ flex: 1 }}>
-                          {seg.speaker && (
-                            <span style={{ fontWeight: 600, color: theme.textStrong, marginRight: 6 }}>
-                              {seg.speaker}:
-                            </span>
-                          )}
-                          <span style={{ color: theme.textBody }}>{seg.text}</span>
+                          <span
+                            style={{
+                              fontFamily: font.mono,
+                              fontSize: 11.5,
+                              color: theme.textFaint,
+                              flex: "0 0 44px",
+                              paddingTop: 2,
+                            }}
+                          >
+                            {seg.at}
+                          </span>
+                          <div style={{ flex: 1 }}>
+                            {seg.speaker && (
+                              <span style={{ fontWeight: 600, color: theme.textStrong, marginRight: 6 }}>
+                                {seg.speaker}:
+                              </span>
+                            )}
+                            <span style={{ color: theme.textBody }}>{seg.text}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* Tab 2: Notes & Query View */}
+              {detailTab === "notes" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* Stale notes warning banner */}
+                  {selectedMeeting.notes_stale && (
+                    <Card
+                      pad={14}
+                      style={{
+                        borderColor: theme.accentSoftBorder,
+                        background: theme.cardBgSubtle,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <Dot ok={false} size={8} />
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: theme.textStrong }}>
+                            Notes may be outdated
+                          </div>
+                          <div style={{ fontSize: 12, color: theme.textMuted }}>
+                            The transcript was modified after these notes were compiled.
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
+                      <Button
+                        size="sm"
+                        variant="accent"
+                        onClick={() => void handleGenerateNotes(true)}
+                        disabled={generatingNotes}
+                      >
+                        {generatingNotes ? "Regenerating..." : "Regenerate notes"}
+                      </Button>
+                    </Card>
+                  )}
+
+                  {/* Notes generation controls card */}
+                  <Card pad={18}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                          Automated Notes
+                        </div>
+                        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                          Generate structured meeting notes with your chosen template.
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void handleDraftFollowup()}
+                          disabled={draftingFollowup || !selectedMeeting.has_notes}
+                        >
+                          {draftingFollowup ? "Drafting email..." : "Draft follow-up"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="accent"
+                          onClick={() => void handleGenerateNotes(selectedMeeting.notes_stale)}
+                          disabled={generatingNotes}
+                        >
+                          {generatingNotes
+                            ? "Generating..."
+                            : selectedMeeting.has_notes
+                              ? "Regenerate notes"
+                              : "Generate notes"}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 12, color: theme.textMuted, display: "block", marginBottom: 6 }}>
+                        Note template
+                      </label>
+                      <Segmented<Template>
+                        options={TEMPLATE_OPTIONS}
+                        value={selectedTemplate}
+                        onChange={setSelectedTemplate}
+                      />
+                    </div>
+
+                    {/* Follow-up email draft display if requested */}
+                    {followupText && (
+                      <div
+                        style={{
+                          marginBottom: 14,
+                          padding: "12px 14px",
+                          background: theme.cardBgSubtle,
+                          border: `1px solid ${theme.border}`,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: theme.textStrong }}>
+                            Draft Follow-up Email
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setFollowupText(null)}
+                            style={{ border: "none", background: "transparent", color: theme.textMuted, cursor: "pointer" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            lineHeight: 1.5,
+                            color: theme.textBody,
+                            whiteSpace: "pre-wrap",
+                            background: theme.cardBg,
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            border: `1px solid ${theme.border}`,
+                          }}
+                        >
+                          {followupText}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Notes Editor Textarea */}
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <label style={{ fontSize: 12, color: theme.textMuted }}>
+                          Notes editor (Markdown)
+                        </label>
+                        {notesSaveNotice && (
+                          <span style={{ fontSize: 12, color: palette.success, fontWeight: 600 }}>
+                            {notesSaveNotice}
+                          </span>
+                        )}
+                      </div>
+
+                      {loadingNotes ? (
+                        <div style={{ padding: 24, textAlign: "center", color: theme.textMuted, fontSize: 13 }}>
+                          Loading notes...
+                        </div>
+                      ) : (
+                        <textarea
+                          rows={12}
+                          value={notesText}
+                          onChange={(e) => {
+                            setNotesText(e.target.value);
+                            setNotesSaveNotice(null);
+                          }}
+                          placeholder={
+                            selectedMeeting.has_notes
+                              ? "Notes content..."
+                              : "No notes compiled yet. Select a template and click 'Generate notes'."
+                          }
+                          style={{
+                            ...inputStyle,
+                            width: "100%",
+                            resize: "vertical",
+                            lineHeight: 1.6,
+                            fontFamily: font.mono,
+                            fontSize: 13,
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      )}
+
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                        <Button
+                          size="sm"
+                          variant="dark"
+                          onClick={() => void handleSaveNotes()}
+                          disabled={savingNotes || !notesText.trim()}
+                        >
+                          {savingNotes ? "Saving..." : "Save changes"}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Ask This Meeting Card */}
+                  <Card pad={18}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong, marginBottom: 4 }}>
+                      Ask This Meeting
+                    </div>
+                    <div style={{ fontSize: 12.5, color: theme.textMuted, marginBottom: 12 }}>
+                      Query specific details from this meeting transcript.
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, marginBottom: meetingAnswer ? 12 : 0 }}>
+                      <input
+                        value={meetingQuestion}
+                        onChange={(e) => setMeetingQuestion(e.target.value)}
+                        placeholder="e.g. What were the next action items assigned to engineering?"
+                        style={{ ...inputStyle, flex: 1, padding: "8px 12px" }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void handleAskMeeting();
+                          }
+                        }}
+                      />
+                      <Button
+                        variant="dark"
+                        onClick={() => void handleAskMeeting()}
+                        disabled={askingMeeting || !meetingQuestion.trim()}
+                      >
+                        {askingMeeting ? "Thinking..." : "Ask"}
+                      </Button>
+                    </div>
+
+                    {meetingAnswer && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: "10px 14px",
+                          background: theme.cardBgSubtle,
+                          border: `1px solid ${theme.border}`,
+                          borderRadius: 8,
+                          fontSize: 13,
+                          lineHeight: 1.55,
+                          color: theme.textBody,
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, color: theme.textStrong, marginBottom: 4 }}>
+                          Answer
+                        </div>
+                        {meetingAnswer}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              )}
             </div>
           ) : (
             /* Meeting List View */
