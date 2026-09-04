@@ -4,6 +4,7 @@ import { theme } from "./theme";
 import { Button, Card, Dot, PageTitle, Segmented } from "./ui";
 import { ActionError, useAction } from "./useAction";
 import { Icon } from "./icons";
+import { OatmealAskBar, type QAItem } from "./OatmealAskBar";
 import {
   listMeetings,
   searchMeetings,
@@ -43,7 +44,6 @@ import {
   type Flashcard,
   type QuizQuestion,
   type HomeworkItem,
-  type LibraryAnswer,
 } from "./api";
 
 function formatDurationSecs(secs: number): string {
@@ -140,9 +140,8 @@ export function LibraryPane() {
 
   // Ask Library state
   const [showAskLibrary, setShowAskLibrary] = useState(false);
-  const [libraryQuestion, setLibraryQuestion] = useState("");
-  const [libraryAnswer, setLibraryAnswer] = useState<LibraryAnswer | null>(null);
-  const [askingLibrary, setAskingLibrary] = useState(false);
+  const [meetingQAHistory, setMeetingQAHistory] = useState<Record<string, QAItem[]>>({});
+  const [libraryQAItems, setLibraryQAItems] = useState<QAItem[]>([]);
 
   // Folder creation / renaming
   const [newFolderName, setNewFolderName] = useState("");
@@ -410,16 +409,72 @@ export function LibraryPane() {
     });
   };
 
-  // Ask Library action
-  const handleAskLibrary = async () => {
-    const q = libraryQuestion.trim();
-    if (!q || askingLibrary) return;
-    setAskingLibrary(true);
-    await run(async () => {
-      const ans = await askLibrary(q);
-      setLibraryAnswer(ans);
-    });
-    setAskingLibrary(false);
+  const handleMeetingAsk = async (question: string) => {
+    if (!selectedMeeting) return;
+    const meetingId = selectedMeeting.id;
+    const tempId = `qa-${Date.now()}`;
+    const newItem: QAItem = { id: tempId, question, answer: "", loading: true };
+
+    setMeetingQAHistory((prev) => ({
+      ...prev,
+      [meetingId]: [...(prev[meetingId] ?? []), newItem],
+    }));
+
+    try {
+      const answer = await askMeeting(meetingId, question);
+      setMeetingQAHistory((prev) => ({
+        ...prev,
+        [meetingId]: (prev[meetingId] ?? []).map((q) =>
+          q.id === tempId ? { ...q, answer, loading: false } : q
+        ),
+      }));
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setMeetingQAHistory((prev) => ({
+        ...prev,
+        [meetingId]: (prev[meetingId] ?? []).map((q) =>
+          q.id === tempId ? { ...q, error: errorMsg, loading: false } : q
+        ),
+      }));
+    }
+  };
+
+  const handleDismissMeetingQA = (id: string) => {
+    if (!selectedMeeting) return;
+    const meetingId = selectedMeeting.id;
+    setMeetingQAHistory((prev) => ({
+      ...prev,
+      [meetingId]: (prev[meetingId] ?? []).filter((q) => q.id !== id),
+    }));
+  };
+
+  const handleGlobalLibraryAsk = async (question: string) => {
+    const tempId = `global-qa-${Date.now()}`;
+    const newItem: QAItem = { id: tempId, question, answer: "", loading: true };
+
+    setLibraryQAItems((prev) => [...prev, newItem]);
+
+    try {
+      const res = await askLibrary(question);
+      setLibraryQAItems((prev) =>
+        prev.map((q) =>
+          q.id === tempId
+            ? { ...q, answer: res.answer, sources: res.sources, loading: false }
+            : q
+        )
+      );
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setLibraryQAItems((prev) =>
+        prev.map((q) =>
+          q.id === tempId ? { ...q, error: errorMsg, loading: false } : q
+        )
+      );
+    }
+  };
+
+  const handleDismissLibraryQA = (id: string) => {
+    setLibraryQAItems((prev) => prev.filter((q) => q.id !== id));
   };
 
   // Filter meetings by selected folder
@@ -528,9 +583,14 @@ export function LibraryPane() {
       {/* Ask the Library Drawer */}
       {showAskLibrary && (
         <Card pad={18} style={{ marginBottom: 20, borderColor: theme.accentSoftBorder }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
-              Ask the Library (Cross-Meeting Query)
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+                Ask the Library (Cross-Meeting Query)
+              </div>
+              <div style={{ fontSize: 12.5, color: theme.textMuted, marginTop: 2 }}>
+                Search for decisions, discussions, or topics across all recorded transcripts in your library.
+              </div>
             </div>
             <button
               type="button"
@@ -540,84 +600,30 @@ export function LibraryPane() {
                 background: "transparent",
                 color: theme.textMuted,
                 cursor: "pointer",
+                fontSize: 16,
               }}
             >
               ✕
             </button>
           </div>
-          <div style={{ fontSize: 12.5, color: theme.textMuted, marginBottom: 12 }}>
-            Search for decisions, discussions, or topics across all recorded transcripts in your library.
-          </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: libraryAnswer ? 12 : 0 }}>
-            <input
-              value={libraryQuestion}
-              onChange={(e) => setLibraryQuestion(e.target.value)}
-              placeholder="e.g. When did we discuss onboarding and what was decided?"
-              style={{ ...inputStyle, flex: 1, padding: "8px 12px" }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleAskLibrary();
-                }
-              }}
-            />
-            <Button
-              variant="dark"
-              onClick={() => void handleAskLibrary()}
-              disabled={askingLibrary || !libraryQuestion.trim()}
-            >
-              {askingLibrary ? "Searching..." : "Search Library"}
-            </Button>
-          </div>
 
-          {libraryAnswer && (
-            <div
-              style={{
-                marginTop: 14,
-                padding: "12px 14px",
-                background: theme.cardBgSubtle,
-                border: `1px solid ${theme.border}`,
-                borderRadius: 8,
-              }}
-            >
-              <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.textBody, whiteSpace: "pre-wrap", marginBottom: 12 }}>
-                {libraryAnswer.answer}
-              </div>
-
-              {libraryAnswer.sources.length > 0 && (
-                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>
-                    Sources Referenced:
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {libraryAnswer.sources.map((src) => (
-                      <button
-                        key={src.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedMeetingId(src.id);
-                          setShowAskLibrary(false);
-                        }}
-                        style={{
-                          border: `1px solid ${theme.border}`,
-                          background: theme.cardBg,
-                          borderRadius: 6,
-                          padding: "4px 8px",
-                          fontSize: 12,
-                          color: theme.accentDeep,
-                          cursor: "pointer",
-                          fontFamily: font.ui,
-                          fontWeight: 500,
-                        }}
-                      >
-                        {src.title} ({formatDate(src.started_at)})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <OatmealAskBar
+            items={libraryQAItems}
+            onAsk={handleGlobalLibraryAsk}
+            onDismiss={handleDismissLibraryQA}
+            onSelectSource={(sourceId) => {
+              setSelectedMeetingId(sourceId);
+              setShowAskLibrary(false);
+            }}
+            placeholder="Ask across all your meetings (e.g. 'what did we decide about pricing?')"
+            suggestions={[
+              "Decisions across all meetings",
+              "Key action items pending",
+              "Latest roadmap updates",
+              "Recurring topics discussed",
+            ]}
+            stickyBottom={false}
+          />
         </Card>
       )}
 
@@ -1809,6 +1815,19 @@ export function LibraryPane() {
                   )}
                 </Card>
               )}
+
+              {/* Oatmeal Grounded Ask Bar for Meeting */}
+              <div style={{ marginTop: 24 }}>
+                <OatmealAskBar
+                  items={selectedMeeting ? (meetingQAHistory[selectedMeeting.id] ?? []) : []}
+                  onAsk={handleMeetingAsk}
+                  onDismiss={handleDismissMeetingQA}
+                  placeholder={`Ask anything about ${selectedMeeting.title}...`}
+                  suggestions={["Key decisions", "Action items", "Main topics", "Next steps", "Pillars / Takeaways"]}
+                  disabled={!selectedMeeting.transcribed}
+                  stickyBottom={true}
+                />
+              </div>
             </div>
           ) : (
             /* Meeting List View */
