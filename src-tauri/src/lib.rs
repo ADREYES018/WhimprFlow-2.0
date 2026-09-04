@@ -12,6 +12,7 @@ mod diag;
 mod hotkey;
 mod local_llm;
 mod paste;
+mod window;
 #[cfg(target_os = "windows")]
 mod win;
 
@@ -22,8 +23,9 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
-const OVERLAY_LABEL: &str = "whimpr_bar";
-const HUB_LABEL: &str = "main";
+pub const OVERLAY_LABEL: &str = "whimpr_bar";
+pub const HUB_LABEL: &str = "main";
+pub const TRANSCRIPT_WINDOW: &str = "transcript";
 
 #[derive(Clone, Serialize)]
 struct BarStatePayload {
@@ -76,6 +78,8 @@ fn build_overlay(app: &tauri::App) -> tauri::Result<WebviewWindow> {
     .resizable(false)
     .visible(true)
     .build()?;
+    let hidden = HIDDEN_FROM_CAPTURE.load(std::sync::atomic::Ordering::SeqCst);
+    let _ = window::set_hidden_from_capture(&overlay, hidden);
     position_overlay(&overlay);
     let _ = overlay.show();
     Ok(overlay)
@@ -268,6 +272,7 @@ struct StatusReport {
     accessibility: bool,
     microphone: bool,
     input_monitoring: bool,
+    screen_recording: bool,
     has_openai_key: bool,
     has_anthropic_key: bool,
 }
@@ -278,6 +283,7 @@ fn get_status() -> StatusReport {
         accessibility: paste::is_trusted(),
         microphone: paste::microphone_granted(),
         input_monitoring: paste::input_monitoring_granted(),
+        screen_recording: whimpr_audio::sysaudio::has_screen_capture_permission(),
         has_openai_key: has_key("openai_api_key"),
         has_anthropic_key: has_key("anthropic_api_key"),
     }
@@ -303,6 +309,11 @@ fn has_key(account: &str) -> bool {
 #[cfg(target_os = "macos")]
 fn open_url(url: &str) {
     let _ = std::process::Command::new("open").arg(url).spawn();
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn CGRequestScreenCaptureAccess() -> bool;
 }
 
 /// Request microphone access: trigger the native prompt (bundle has a usage string)
@@ -341,6 +352,73 @@ fn request_input_monitoring() {
         let _ = paste::request_input_monitoring();
         open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent");
     }
+}
+
+/// Request Screen Recording (needed for recording system audio in meetings):
+/// trigger the system prompt and open the pane.
+#[tauri::command]
+fn request_screen_recording() {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe {
+            let _ = CGRequestScreenCaptureAccess();
+        }
+        open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+    }
+}
+
+static HIDDEN_FROM_CAPTURE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+#[tauri::command]
+fn set_hidden_from_capture(app: tauri::AppHandle, hidden: bool) -> Result<(), String> {
+    let _ = window::apply_on_main(&app, OVERLAY_LABEL, hidden);
+    let _ = window::apply_on_main(&app, TRANSCRIPT_WINDOW, hidden);
+    HIDDEN_FROM_CAPTURE.store(hidden, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+fn is_hidden_from_capture() -> bool {
+    HIDDEN_FROM_CAPTURE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn set_transcript_window_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> {
+    let win = if let Some(w) = app.get_webview_window(TRANSCRIPT_WINDOW) {
+        w
+    } else {
+        let win = WebviewWindowBuilder::new(&app, TRANSCRIPT_WINDOW, WebviewUrl::App("transcript.html".into()))
+            .title("WhimprFlow Transcript")
+            .inner_size(480.0, 600.0)
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?;
+        let hidden = HIDDEN_FROM_CAPTURE.load(std::sync::atomic::Ordering::SeqCst);
+        let _ = window::set_hidden_from_capture(&win, hidden);
+        win
+    };
+    if visible {
+        win.show().map_err(|e| e.to_string())?;
+        win.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        win.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_transcript_pinned(app: tauri::AppHandle, pinned: bool) -> Result<(), String> {
+    let win = app
+        .get_webview_window(TRANSCRIPT_WINDOW)
+        .ok_or("transcript window not found")?;
+    window::set_pinned(&win, pinned)
+}
+
+#[tauri::command]
+fn is_transcript_window_visible(app: tauri::AppHandle) -> bool {
+    app.get_webview_window(TRANSCRIPT_WINDOW)
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
 }
 
 /// Save (or clear, when empty) an API key in the OS keychain, then rebuild providers
@@ -397,6 +475,12 @@ pub fn run() {
             request_microphone,
             request_accessibility,
             request_input_monitoring,
+            request_screen_recording,
+            set_hidden_from_capture,
+            is_hidden_from_capture,
+            set_transcript_window_visible,
+            set_transcript_pinned,
+            is_transcript_window_visible,
             set_api_key,
             list_models,
             get_snippets,

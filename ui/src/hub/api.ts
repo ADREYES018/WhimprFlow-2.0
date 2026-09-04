@@ -24,8 +24,10 @@ export interface Status {
   accessibility: boolean;
   microphone: boolean;
   input_monitoring: boolean;
+  screen_recording: boolean;
   has_openai_key: boolean;
   has_anthropic_key: boolean;
+  meeting_recording_active?: boolean;
 }
 
 export interface StatsSummary {
@@ -94,8 +96,10 @@ export async function getStatus(): Promise<Status> {
       accessibility: false,
       microphone: false,
       input_monitoring: false,
+      screen_recording: false,
       has_openai_key: false,
       has_anthropic_key: false,
+      meeting_recording_active: false,
     };
   }
 }
@@ -146,6 +150,54 @@ export async function requestInputMonitoring(): Promise<void> {
     await invoke<void>("request_input_monitoring");
   } catch {
     /* browser preview */
+  }
+}
+
+export async function requestScreenRecording(): Promise<void> {
+  try {
+    await invoke<void>("request_screen_recording");
+  } catch {
+    /* browser preview */
+  }
+}
+
+export async function setHiddenFromCapture(hidden: boolean): Promise<void> {
+  try {
+    await invoke<void>("set_hidden_from_capture", { hidden });
+  } catch {
+    /* browser preview */
+  }
+}
+
+export async function isHiddenFromCapture(): Promise<boolean> {
+  try {
+    return await invoke<boolean>("is_hidden_from_capture");
+  } catch {
+    return true;
+  }
+}
+
+export async function setTranscriptWindowVisible(visible: boolean): Promise<void> {
+  try {
+    await invoke<void>("set_transcript_window_visible", { visible });
+  } catch {
+    /* browser preview */
+  }
+}
+
+export async function setTranscriptPinned(pinned: boolean): Promise<void> {
+  try {
+    await invoke<void>("set_transcript_pinned", { pinned });
+  } catch {
+    /* browser preview */
+  }
+}
+
+export async function isTranscriptWindowVisible(): Promise<boolean> {
+  try {
+    return await invoke<boolean>("is_transcript_window_visible");
+  } catch {
+    return false;
   }
 }
 

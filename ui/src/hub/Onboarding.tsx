@@ -5,6 +5,7 @@ import {
   requestAccessibility,
   requestMicrophone,
   requestInputMonitoring,
+  requestScreenRecording,
   type Status,
 } from "./api";
 
@@ -116,6 +117,7 @@ export function Onboarding({
   const acc = status.accessibility;
   const mic = status.microphone;
   const inp = status.input_monitoring;
+  const scr = status.screen_recording;
   const canEnter = acc && mic;
 
   return (
@@ -186,6 +188,16 @@ export function Onboarding({
           locked={!(acc && mic)}
           required={false}
           onGrant={() => requestInputMonitoring()}
+        />
+        <Step
+          n={4}
+          title="Screen Recording"
+          detail="Needed for recording system audio in meetings. Dictation works without it."
+          done={scr}
+          active={acc && mic && !scr}
+          locked={!(acc && mic)}
+          required={false}
+          onGrant={() => requestScreenRecording()}
         />
 
         <button

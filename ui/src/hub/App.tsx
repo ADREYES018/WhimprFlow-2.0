@@ -18,6 +18,7 @@ import {
   getStatus,
   getLastError,
   requestAccessibility,
+  requestScreenRecording,
   type Settings,
   type Status,
   type LastError,
@@ -109,6 +110,7 @@ export function App() {
     accessibility: false,
     microphone: false,
     input_monitoring: false,
+    screen_recording: false,
     has_openai_key: false,
     has_anthropic_key: false,
   });
@@ -164,6 +166,8 @@ export function App() {
   // onboarding gate), or the pipeline reported some other failure (hotkey tap
   // dead, paste failed, empty transcript, …).
   const accessibilityLapsed = entered && !status.accessibility;
+  const screenRecordingMissing =
+    entered && Boolean(status.meeting_recording_active) && !status.screen_recording;
   const banner = errorDismissed
     ? null
     : accessibilityLapsed
@@ -173,6 +177,13 @@ export function App() {
           actionLabel: "Grant Accessibility",
           onAction: () => requestAccessibility(),
         }
+      : screenRecordingMissing
+        ? {
+            headline: "Screen Recording permission needed",
+            detail: "System audio cannot be recorded in meetings without Screen Recording permission.",
+            actionLabel: "Grant Screen Recording",
+            onAction: () => requestScreenRecording(),
+          }
       : lastError
         ? { headline: lastError.headline, detail: lastError.detail }
         : null;
