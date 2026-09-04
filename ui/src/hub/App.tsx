@@ -13,6 +13,7 @@ import { SnippetsPane } from "./SnippetsPane";
 import { TransformsPane } from "./TransformsPane";
 import { StylePane } from "./StylePane";
 import { MeetingsPane } from "./MeetingsPane";
+import { LibraryPane } from "./LibraryPane";
 import {
   getSettings,
   setSettings,
@@ -215,6 +216,7 @@ export function App() {
           <div style={{ padding: "36px 44px", margin: "0 auto", maxWidth: 1120 }}>
             {page === "home" && <Home />}
             {page === "meetings" && <MeetingsPane />}
+            {page === "library" && <LibraryPane />}
             {page === "insights" && <Insights />}
             {page === "scratchpad" && <ScratchpadPane />}
             {page === "snippets" && <SnippetsPane />}
