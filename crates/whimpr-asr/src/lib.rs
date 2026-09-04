@@ -1,6 +1,8 @@
 //! Local speech-to-text via whisper.cpp (whisper-rs), implementing
 //! [`whimpr_core::AsrEngine`]. Expects 16 kHz mono f32 samples.
 
+pub mod registry;
+
 use std::path::Path;
 
 use whimpr_core::asr::{AsrCaps, AsrEngine, AsrEngineId, Transcript};

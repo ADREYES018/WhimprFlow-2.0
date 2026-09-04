@@ -106,11 +106,11 @@ mod imp {
     /// user a loud "no speech model" error for the real case, not a race
     /// against the ~1s background load right after launch.
     static ASR_MODEL_MISSING: AtomicBool = AtomicBool::new(false);
+    static ASR: OnceLock<whimpr_asr::registry::ModelHandle> = OnceLock::new();
     /// Bundle id of the app that was frontmost at record-start = the paste target.
     /// Cleanup uses it to format for the medium (email vs. text vs. chat).
     static TARGET_APP: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     static CAPTURE: OnceLock<Mutex<Option<whimpr_audio::CaptureHandle>>> = OnceLock::new();
-    static ASR: OnceLock<Arc<whimpr_asr::WhisperEngine>> = OnceLock::new();
     static OPENAI: OnceLock<Mutex<Option<whimpr_cleanup::OpenAiProvider>>> = OnceLock::new();
     static ANTHROPIC: OnceLock<Mutex<Option<whimpr_cleanup::AnthropicProvider>>> = OnceLock::new();
     static LOCAL: OnceLock<Mutex<Option<crate::local_llm::LocalWorker>>> = OnceLock::new();
@@ -734,7 +734,7 @@ mod imp {
                         finish();
                         return;
                     }
-                    let Some(asr) = ASR.get().cloned() else {
+                    let Some(asr) = ASR.get().map(|h| std::sync::Arc::clone(&h.engine)) else {
                         eprintln!("[whimpr] ASR not ready (model still loading or missing)");
                         if was_real_attempt && ASR_MODEL_MISSING.load(Ordering::SeqCst) {
                             crate::diag::report(&app2, whimpr_core::InjectionFailure::AsrUnavailable);
@@ -1000,9 +1000,9 @@ mod imp {
                     return;
                 }
             };
-            match whimpr_asr::WhisperEngine::load(&path) {
-                Ok(engine) => {
-                    let _ = ASR.set(Arc::new(engine));
+            match whimpr_asr::registry::acquire(path) {
+                Ok(handle) => {
+                    let _ = ASR.set(handle);
                     eprintln!("[whimpr] ASR model loaded — ready to transcribe");
                 }
                 Err(e) => {
