@@ -13,9 +13,17 @@ import {
   getStatus,
   requestScreenRecording,
   askMeeting,
+  listEvents,
+  calendarRequestAccess,
+  openCalendarSettings,
+  videoProbe,
+  videoImport,
   type LiveLine,
   type MeetingResult,
   type Status,
+  type CalendarFeed,
+  type CalendarEvent,
+  type VideoInfo,
 } from "./api";
 
 function formatDuration(ms: number): string {
@@ -36,6 +44,19 @@ function formatTimestamp(atMs: number): string {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+function formatEventTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    if (isToday) return `Today ${timeStr}`;
+    return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${timeStr}`;
+  } catch {
+    return iso;
+  }
+}
+
 export function MeetingsPane() {
   const [active, setActive] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -48,8 +69,31 @@ export function MeetingsPane() {
   const [asking, setAsking] = useState(false);
   const [ending, setEnding] = useState(false);
 
+  // Calendar state
+  const [calendarFeed, setCalendarFeed] = useState<CalendarFeed | null>(null);
+  const [requestingCalendar, setRequestingCalendar] = useState(false);
+
+  // Media / Video Import state
+  const [showVideoImport, setShowVideoImport] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [videoStartTime, setVideoStartTime] = useState("00:00");
+  const [videoEndTime, setVideoEndTime] = useState("10:00");
+  const [probingVideo, setProbingVideo] = useState(false);
+  const [importingVideo, setImportingVideo] = useState(false);
+  const [videoImportNotice, setVideoImportNotice] = useState<string | null>(null);
+
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const { error, clearError, run } = useAction();
+
+  const loadCalendar = async () => {
+    try {
+      const feed = await listEvents(7);
+      setCalendarFeed(feed);
+    } catch {
+      // Calendar unavailable or denied
+    }
+  };
 
   // Reconcile active session on mount and listen for live lines
   useEffect(() => {
@@ -73,6 +117,8 @@ export function MeetingsPane() {
       const s = await getStatus();
       if (!mounted) return;
       setStatus(s);
+
+      void loadCalendar();
     };
 
     void init();
@@ -123,7 +169,7 @@ export function MeetingsPane() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [liveLines.length]);
 
-  const handleStart = async () => {
+  const handleStart = async (customTitle?: string) => {
     clearError();
     setLastResult(null);
     setLiveAnswer(null);
@@ -136,7 +182,7 @@ export function MeetingsPane() {
       hour: "2-digit",
       minute: "2-digit",
     })}`;
-    const meetingTitle = titleInput.trim() || defaultTitle;
+    const meetingTitle = customTitle?.trim() || titleInput.trim() || defaultTitle;
 
     const ok = await run(async () => {
       await startSession(meetingTitle, "en");
@@ -165,11 +211,45 @@ export function MeetingsPane() {
     if (!q || asking) return;
     setAsking(true);
     await run(async () => {
-      // Empty id queries live transcript
       const ans = await askMeeting("", q);
       setLiveAnswer(ans);
     });
     setAsking(false);
+  };
+
+  const handleRequestCalendar = async () => {
+    setRequestingCalendar(true);
+    await run(async () => {
+      await calendarRequestAccess();
+      await loadCalendar();
+    });
+    setRequestingCalendar(false);
+  };
+
+  const handleProbeVideo = async () => {
+    const url = videoUrl.trim();
+    if (!url || probingVideo) return;
+    setProbingVideo(true);
+    setVideoImportNotice(null);
+    await run(async () => {
+      const info = await videoProbe(url);
+      setVideoInfo(info);
+    });
+    setProbingVideo(false);
+  };
+
+  const handleImportVideo = async () => {
+    const url = videoUrl.trim();
+    if (!url || importingVideo) return;
+    setImportingVideo(true);
+    const meetingId = `meeting_import_${Date.now()}`;
+    await run(async () => {
+      const notice = await videoImport(meetingId, url, videoStartTime, videoEndTime);
+      setVideoImportNotice(notice || "Video imported successfully into library.");
+      setVideoInfo(null);
+      setVideoUrl("");
+    });
+    setImportingVideo(false);
   };
 
   const inputStyle = {
@@ -312,12 +392,213 @@ export function MeetingsPane() {
                 Start recording
               </Button>
             </div>
-            <div style={{ fontSize: 12, color: theme.textFaint }}>
-              Captures microphone and system audio lanes simultaneously. Hotkey wake-words also initiate recording.
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: theme.textFaint }}>
+              <span>Captures microphone and system audio lanes simultaneously. Hotkeys also initiate recording.</span>
+              <button
+                type="button"
+                onClick={() => setShowVideoImport((v) => !v)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: theme.accentDeep,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontFamily: font.ui,
+                  padding: 0,
+                  fontWeight: 600,
+                }}
+              >
+                {showVideoImport ? "Hide video import" : "Import from video link"}
+              </button>
             </div>
           </div>
         )}
       </Card>
+
+      {/* Video / Media Import Drawer */}
+      {showVideoImport && (
+        <Card pad={18} style={{ marginBottom: 20, borderColor: theme.accentSoftBorder }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+              Import Recorded Video / Audio
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowVideoImport(false)}
+              style={{ border: "none", background: "transparent", color: theme.textMuted, cursor: "pointer" }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ fontSize: 12.5, color: theme.textMuted, marginBottom: 12 }}>
+            Probe and import lecture videos, remote recordings, or media URLs directly into your library.
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: videoInfo ? 12 : 0 }}>
+            <input
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+              placeholder="Paste video URL or local file path (e.g. https://... or /path/to/video.mp4)"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <Button
+              variant="dark"
+              onClick={() => void handleProbeVideo()}
+              disabled={probingVideo || !videoUrl.trim()}
+            >
+              {probingVideo ? "Probing..." : "Probe media"}
+            </Button>
+          </div>
+
+          {videoInfo && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "12px 14px",
+                background: theme.cardBgSubtle,
+                border: `1px solid ${theme.border}`,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: theme.textStrong, marginBottom: 4 }}>
+                Detected: {videoInfo.title}
+              </div>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 10 }}>
+                Duration: {formatDuration(videoInfo.duration_secs * 1000)}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <label style={{ fontSize: 12, color: theme.textMuted }}>Start:</label>
+                <input
+                  value={videoStartTime}
+                  onChange={(e) => setVideoStartTime(e.target.value)}
+                  style={{ ...inputStyle, width: 80, padding: "4px 8px", fontSize: 12 }}
+                />
+                <label style={{ fontSize: 12, color: theme.textMuted }}>End:</label>
+                <input
+                  value={videoEndTime}
+                  onChange={(e) => setVideoEndTime(e.target.value)}
+                  style={{ ...inputStyle, width: 80, padding: "4px 8px", fontSize: 12 }}
+                />
+                <Button
+                  size="sm"
+                  variant="accent"
+                  onClick={() => void handleImportVideo()}
+                  disabled={importingVideo}
+                >
+                  {importingVideo ? "Importing..." : "Import segment"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {videoImportNotice && (
+            <div style={{ marginTop: 10, fontSize: 12.5, color: palette.success, fontWeight: 600 }}>
+              {videoImportNotice}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Upcoming Calendar Events Card */}
+      {!active && (
+        <Card pad={18} style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong }}>
+              Upcoming Calendar Meetings
+            </div>
+            {calendarFeed?.authorized && (
+              <Button size="sm" variant="ghost" onClick={() => void loadCalendar()}>
+                Refresh
+              </Button>
+            )}
+          </div>
+
+          {calendarFeed === null ? (
+            <div style={{ fontSize: 13, color: theme.textMuted, padding: "8px 0" }}>
+              Checking calendar status...
+            </div>
+          ) : !calendarFeed.authorized ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px 14px",
+                background: theme.cardBgSubtle,
+                borderRadius: 8,
+                border: `1px solid ${theme.border}`,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: theme.textStrong }}>
+                  {calendarFeed.denied ? "Calendar access denied" : "Connect Apple Calendar"}
+                </div>
+                <div style={{ fontSize: 12, color: theme.textMuted }}>
+                  {calendarFeed.denied
+                    ? "Calendar permission was denied. You can re-enable it in macOS System Settings."
+                    : "Authorize calendar access to see scheduled meetings and record with one click."}
+                </div>
+              </div>
+
+              {calendarFeed.denied ? (
+                <Button size="sm" variant="ghost" onClick={() => void openCalendarSettings()}>
+                  Open Settings
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="accent"
+                  onClick={() => void handleRequestCalendar()}
+                  disabled={requestingCalendar}
+                >
+                  {requestingCalendar ? "Requesting..." : "Allow Access"}
+                </Button>
+              )}
+            </div>
+          ) : calendarFeed.events.length === 0 ? (
+            <div style={{ fontSize: 13, color: theme.textMuted, padding: "8px 0" }}>
+              No upcoming events found on your calendar for the next 7 days.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {calendarFeed.events.slice(0, 4).map((event: CalendarEvent) => (
+                <div
+                  key={event.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: theme.cardBgSubtle,
+                    borderRadius: 8,
+                    border: `1px solid ${theme.border}`,
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: theme.textStrong }}>
+                      {event.summary}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: theme.textMuted, marginTop: 2 }}>
+                      <span>{formatEventTime(event.start)}</span>
+                      {event.calendar && <span>• {event.calendar}</span>}
+                      {event.location && <span>• {event.location}</span>}
+                    </div>
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void handleStart(event.summary)}
+                  >
+                    Record
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Completed meeting result alert */}
       {lastResult && !active && (
