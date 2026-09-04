@@ -18,6 +18,7 @@ pub mod settings;
 pub mod snippets;
 pub mod state;
 pub mod stats;
+pub mod style;
 pub mod transforms;
 pub mod types;
 
@@ -29,6 +30,7 @@ pub use scratchpad::Scratchpad;
 pub use settings::{CleanupMode, Settings};
 pub use snippets::{Snippet, SnippetStore};
 pub use stats::{HistoryItem, SessionRecord, StatsStore, StatsSummary};
+pub use style::{StyleContext, StyleProfile, StyleStore};
 pub use transforms::{Transform, TransformSource, TransformStore};
 pub use state::{Action, BarState, DictationState, Input, PipelineEvent, StateMachine, TriggerToken};
 pub use types::{RecordMode, SessionId};
