@@ -17,7 +17,10 @@ export type IconName =
   | "sort"
   | "plus"
   | "close"
-  | "mic";
+  | "mic"
+  | "edit"
+  | "trash"
+  | "check";
 
 const PATHS: Record<IconName, string[]> = {
   home: ["M4 11l8-7 8 7", "M6 10v10h12V10"],
@@ -44,6 +47,9 @@ const PATHS: Record<IconName, string[]> = {
   plus: ["M12 5v14", "M5 12h14"],
   close: ["M6 6l12 12", "M18 6L6 18"],
   mic: ["M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z", "M6 11a6 6 0 0 0 12 0", "M12 17v4"],
+  edit: ["M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"],
+  trash: ["M3 6h18", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"],
+  check: ["M20 6L9 17l-5-5"],
 };
 
 export function Icon({

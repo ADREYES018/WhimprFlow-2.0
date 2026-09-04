@@ -8,8 +8,10 @@ import { Insights } from "./Insights";
 import { DictionaryPane } from "./DictionaryPane";
 import { SettingsPane } from "./SettingsPane";
 import { Help } from "./Help";
-import { ComingSoon } from "./ComingSoon";
-import type { IconName } from "./icons";
+import { ScratchpadPane } from "./ScratchpadPane";
+import { SnippetsPane } from "./SnippetsPane";
+import { TransformsPane } from "./TransformsPane";
+import { StylePane } from "./StylePane";
 import {
   getSettings,
   setSettings,
@@ -98,29 +100,6 @@ function ErrorBanner({
   );
 }
 
-// Placeholder screens that are routed but not yet built.
-const SOON: Partial<Record<Page, { icon: IconName; title: string; desc: string }>> = {
-  snippets: {
-    icon: "snippets",
-    title: "Snippets",
-    desc: "Save reusable phrases and expand them by voice — signatures, addresses, boilerplate.",
-  },
-  style: {
-    icon: "style",
-    title: "Style",
-    desc: "Tune WhimprFlow's tone and formatting so cleaned-up text always sounds like you.",
-  },
-  transforms: {
-    icon: "transforms",
-    title: "Transforms",
-    desc: "Turn a quick spoken thought into an email, a summary, or a to-do with one command.",
-  },
-  scratchpad: {
-    icon: "scratchpad",
-    title: "Scratchpad",
-    desc: "A quiet place to dictate long-form and shape it before it lands anywhere else.",
-  },
-};
 
 export function App() {
   const [page, setPage] = useState<Page>("home");
@@ -180,8 +159,6 @@ export function App() {
     return <Onboarding status={status} refresh={refresh} onEnter={() => setEntered(true)} />;
   }
 
-  const soon = SOON[page];
-
   // Two independent reasons for the post-onboarding banner: Accessibility
   // lapsed after entry (checked live against `status`, not just the one-time
   // onboarding gate), or the pipeline reported some other failure (hotkey tap
@@ -226,12 +203,15 @@ export function App() {
           <div style={{ padding: "36px 44px", margin: "0 auto", maxWidth: 1120 }}>
             {page === "home" && <Home />}
             {page === "insights" && <Insights />}
+            {page === "scratchpad" && <ScratchpadPane />}
+            {page === "snippets" && <SnippetsPane />}
+            {page === "transforms" && <TransformsPane />}
+            {page === "style" && <StylePane />}
             {page === "dictionary" && <DictionaryPane />}
             {page === "settings" && (
               <SettingsPane settings={settings} onChange={update} status={status} refresh={refresh} />
             )}
             {page === "help" && <Help />}
-            {soon && <ComingSoon icon={soon.icon} title={soon.title} desc={soon.desc} />}
           </div>
         </main>
       </div>

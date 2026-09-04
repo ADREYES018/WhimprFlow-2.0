@@ -25,3 +25,4 @@ src-tauri/gen/
 .env
 .env.*
 *.pem
+build.log
