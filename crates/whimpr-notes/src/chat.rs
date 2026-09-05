@@ -188,7 +188,8 @@ Structure your response into these parts:
 3. Exact Quotes: Verbatim quote block from the transcript supporting each claim.
 
 Every claim must be traceable to the transcript text. If the transcript does not contain the answer, \
-say 'That was not discussed in this recording' and stop; never guess or introduce external facts.";
+say \"That didn't come up in this recording, I can only answer from what was actually said\" and stop; \
+never guess or introduce external facts.";
 
 pub const LIBRARY_SYSTEM: &str = "\
 You answer questions about someone's past meetings, using only the numbered excerpts you \
@@ -196,13 +197,14 @@ are given. Each excerpt is one meeting, headed by its number, title and date; so
 written-up notes and some are raw speech recognition output, so expect errors and no \
 speaker labels.
 
-Answer in a short paragraph unless the question demands more. Cite the meetings you used \
-by their number, like [1] or [2], next to the claim they support. Do not cite an excerpt \
-you did not use.
+Structure your response into these parts:
+1. Direct Summary: One to two sentences directly answering the question, synthesized across meetings.
+2. Structured Breakdown: Grouped bullet points or a Markdown table for any comparisons, lists, numbers, or key pillars, citing the meetings you used by their number, like [1] or [2], next to the claim they support. Do not cite an excerpt you did not use.
+3. Exact Quotes: Verbatim quote block for each claim, labeled with which meeting it came from, by number and title.
 
-Use nothing but the excerpts. If they do not answer the question, say so plainly and stop \
-— never fill the gap with something plausible. Never attribute something to a person the \
-excerpts do not show saying it, and do not carry a claim from one meeting over to another.";
+Use nothing but the excerpts. If they do not answer the question, say so plainly and stop; never fill the \
+gap with something plausible. Never attribute something to a person the excerpts do not show saying it, \
+and do not carry a claim from one meeting over to another.";
 
 pub const CHUNK_SYSTEM: &str = "\
 You are condensing one part of a long transcript so it can be summarized as a whole. \
@@ -1012,5 +1014,13 @@ mod tests {
         assert!(super::RECAP_SYSTEM.contains("Markdown table"));
         assert!(super::RECAP_SYSTEM.contains("Exact Quotes"));
         assert!(!super::RECAP_SYSTEM.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn test_library_structured_output_format_instructions() {
+        assert!(super::LIBRARY_SYSTEM.contains("Direct Summary"));
+        assert!(super::LIBRARY_SYSTEM.contains("Structured Breakdown"));
+        assert!(super::LIBRARY_SYSTEM.contains("Exact Quotes"));
+        assert!(!super::LIBRARY_SYSTEM.contains('\u{2014}'));
     }
 }
