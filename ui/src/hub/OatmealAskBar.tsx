@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { theme } from "./theme";
 import { font, palette } from "../tokens/values";
+import { AnswerMarkdown } from "./AnswerMarkdown";
+import { formatDate } from "./format";
 
 export interface QAItem {
   id: string;
@@ -79,7 +81,7 @@ export function OatmealAskBar({
                 border: `1px solid ${theme.border}`,
                 borderRadius: 14,
                 padding: "16px 20px",
-                boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
+                boxShadow: theme.shadowSoft,
               }}
             >
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
@@ -105,16 +107,16 @@ export function OatmealAskBar({
                 </button>
               </div>
 
-              <div style={{ marginTop: 10, fontSize: 13.5, lineHeight: 1.65, color: theme.textBody, whiteSpace: "pre-wrap" }}>
+              <div style={{ marginTop: 10 }}>
                 {item.loading ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMuted }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: theme.textMuted, fontSize: 13.5 }}>
                     <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: theme.accentDeep }} />
                     Thinking...
                   </div>
                 ) : item.error ? (
-                  <div style={{ color: palette.error }}>{item.error}</div>
+                  <div style={{ color: palette.error, fontSize: 13.5 }}>{item.error}</div>
                 ) : (
-                  item.answer
+                  <AnswerMarkdown text={item.answer} />
                 )}
               </div>
 
@@ -138,9 +140,10 @@ export function OatmealAskBar({
                           fontSize: 11.5,
                           color: theme.accentDeep,
                           cursor: "pointer",
+                          fontFamily: font.ui,
                         }}
                       >
-                        {s.title}
+                        {s.title} ({formatDate(s.started_at)})
                       </button>
                     ))}
                   </div>

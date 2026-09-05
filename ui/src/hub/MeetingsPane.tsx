@@ -4,6 +4,7 @@ import { theme } from "./theme";
 import { Button, Card, Dot, PageTitle } from "./ui";
 import { ActionError, useAction } from "./useAction";
 import { Icon } from "./icons";
+import { AnswerMarkdown } from "./AnswerMarkdown";
 import {
   startSession,
   stopSession,
@@ -793,16 +794,12 @@ export function MeetingsPane() {
               background: theme.cardBgSubtle,
               border: `1px solid ${theme.border}`,
               borderRadius: 8,
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: theme.textBody,
-              whiteSpace: "pre-wrap",
             }}
           >
-            <div style={{ fontWeight: 600, color: theme.textStrong, marginBottom: 4 }}>
+            <div style={{ fontWeight: 600, color: theme.textStrong, marginBottom: 4, fontSize: 13 }}>
               Answer
             </div>
-            {liveAnswer}
+            <AnswerMarkdown text={liveAnswer} />
           </div>
         )}
       </Card>
