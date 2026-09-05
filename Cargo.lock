@@ -5211,6 +5211,7 @@ dependencies = [
  "strsim",
  "thiserror 1.0.69",
  "tracing",
+ "whimpr-cleanup",
  "whimpr-ipc",
 ]
 

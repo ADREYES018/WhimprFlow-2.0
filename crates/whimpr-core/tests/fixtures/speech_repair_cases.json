@@ -1,0 +1,67 @@
+[
+  {
+    "raw": "call john at three actually four",
+    "expected": "Call John at four.",
+    "kind": "marked"
+  },
+  {
+    "raw": "book the flight for friday no monday",
+    "expected": "Book the flight for Monday.",
+    "kind": "marked"
+  },
+  {
+    "raw": "email the report to sam scratch that jenna",
+    "expected": "Email the report to Jenna.",
+    "kind": "marked"
+  },
+  {
+    "raw": "the meeting is at ten i mean eleven",
+    "expected": "The meeting is at 11.",
+    "kind": "marked"
+  },
+  {
+    "raw": "order the blue shirt wait the red one",
+    "expected": "Order the red shirt.",
+    "kind": "marked"
+  },
+  {
+    "raw": "put the meeting on tuesday well thursday works better",
+    "expected": "Put the meeting on Thursday.",
+    "kind": "marked"
+  },
+  {
+    "raw": "call the client today let me think tomorrow",
+    "expected": "Call the client tomorrow.",
+    "kind": "marked"
+  },
+  {
+    "raw": "send it to accounting send it to finance",
+    "expected": "Send it to finance.",
+    "kind": "unmarked"
+  },
+  {
+    "raw": "the file is in the shared drive the file is in dropbox",
+    "expected": "The file is in Dropbox.",
+    "kind": "unmarked"
+  },
+  {
+    "raw": "reserve the room for two reserve the room for four",
+    "expected": "Reserve the room for four.",
+    "kind": "unmarked"
+  },
+  {
+    "raw": "i actually really liked the new design",
+    "expected": "I actually really liked the new design.",
+    "kind": "anti_trigger"
+  },
+  {
+    "raw": "she said she would or wouldn't come",
+    "expected": "She said she would or wouldn't come.",
+    "kind": "anti_trigger"
+  },
+  {
+    "raw": "i guess we should wait and see",
+    "expected": "I guess we should wait and see.",
+    "kind": "anti_trigger"
+  }
+]
