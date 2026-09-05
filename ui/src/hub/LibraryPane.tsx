@@ -5,6 +5,7 @@ import { Button, Card, Dot, PageTitle, Segmented } from "./ui";
 import { ActionError, useAction } from "./useAction";
 import { Icon } from "./icons";
 import { OatmealAskBar, type QAItem } from "./OatmealAskBar";
+import { formatDate } from "./format";
 import {
   listMeetings,
   searchMeetings,
@@ -54,19 +55,6 @@ function formatDurationSecs(secs: number): string {
   return `${m}m ${s}s`;
 }
 
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
 
 type DetailTab = "transcript" | "notes" | "study" | "homework";
 
@@ -107,9 +95,6 @@ export function LibraryPane() {
   const [notesSaveNotice, setNotesSaveNotice] = useState<string | null>(null);
   const [followupText, setFollowupText] = useState<string | null>(null);
   const [draftingFollowup, setDraftingFollowup] = useState(false);
-  const [meetingQuestion, setMeetingQuestion] = useState("");
-  const [meetingAnswer, setMeetingAnswer] = useState<string | null>(null);
-  const [askingMeeting, setAskingMeeting] = useState(false);
 
   // Study Hub state
   const [studySubTab, setStudySubTab] = useState<"plan" | "flashcards" | "quiz">("plan");
@@ -179,7 +164,6 @@ export function LibraryPane() {
       setSegments([]);
       setNotesText("");
       setFollowupText(null);
-      setMeetingAnswer(null);
       setStudyPlan(null);
       setFlashcards(null);
       setQuiz(null);
@@ -320,17 +304,6 @@ export function LibraryPane() {
       await loadAll();
     });
     setSavingNotes(false);
-  };
-
-  const handleAskMeeting = async () => {
-    const q = meetingQuestion.trim();
-    if (!q || askingMeeting || !selectedMeeting) return;
-    setAskingMeeting(true);
-    await run(async () => {
-      const ans = await askMeeting(selectedMeeting.id, q);
-      setMeetingAnswer(ans);
-    });
-    setAskingMeeting(false);
   };
 
   const handleDraftFollowup = async () => {
@@ -1293,59 +1266,6 @@ export function LibraryPane() {
                       </div>
                     </div>
                   </Card>
-
-                  {/* Ask This Meeting Card */}
-                  <Card pad={18}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: theme.textStrong, marginBottom: 4 }}>
-                      Ask This Meeting
-                    </div>
-                    <div style={{ fontSize: 12.5, color: theme.textMuted, marginBottom: 12 }}>
-                      Query specific details from this meeting transcript.
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, marginBottom: meetingAnswer ? 12 : 0 }}>
-                      <input
-                        value={meetingQuestion}
-                        onChange={(e) => setMeetingQuestion(e.target.value)}
-                        placeholder="e.g. What were the next action items assigned to engineering?"
-                        style={{ ...inputStyle, flex: 1, padding: "8px 12px" }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void handleAskMeeting();
-                          }
-                        }}
-                      />
-                      <Button
-                        variant="dark"
-                        onClick={() => void handleAskMeeting()}
-                        disabled={askingMeeting || !meetingQuestion.trim()}
-                      >
-                        {askingMeeting ? "Thinking..." : "Ask"}
-                      </Button>
-                    </div>
-
-                    {meetingAnswer && (
-                      <div
-                        style={{
-                          marginTop: 10,
-                          padding: "10px 14px",
-                          background: theme.cardBgSubtle,
-                          border: `1px solid ${theme.border}`,
-                          borderRadius: 8,
-                          fontSize: 13,
-                          lineHeight: 1.55,
-                          color: theme.textBody,
-                          whiteSpace: "pre-wrap",
-                        }}
-                      >
-                        <div style={{ fontWeight: 600, color: theme.textStrong, marginBottom: 4 }}>
-                          Answer
-                        </div>
-                        {meetingAnswer}
-                      </div>
-                    )}
-                  </Card>
                 </div>
               )}
 
@@ -1825,6 +1745,7 @@ export function LibraryPane() {
               {/* Oatmeal Grounded Ask Bar for Meeting */}
               <div style={{ marginTop: 24 }}>
                 <OatmealAskBar
+                  key={selectedMeeting.id}
                   items={selectedMeeting ? (meetingQAHistory[selectedMeeting.id] ?? []) : []}
                   onAsk={handleMeetingAsk}
                   onDismiss={handleDismissMeetingQA}

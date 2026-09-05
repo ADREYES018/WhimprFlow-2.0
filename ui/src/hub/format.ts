@@ -68,3 +68,20 @@ export function wordsReference(n: number): string {
 export function newsArticles(n: number): number {
   return Math.max(1, Math.round(n / 800));
 }
+
+// "Sep 5, 2:41 PM". Moved here from LibraryPane so OatmealAskBar's source
+// chips can reuse it too, without LibraryPane and OatmealAskBar importing
+// each other.
+export function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
