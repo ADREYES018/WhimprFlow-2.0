@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { font, palette } from "../tokens/values";
 import { theme } from "./theme";
 import { Onboarding } from "./Onboarding";
-import { Sidebar, type Page } from "./Sidebar";
+import {
+  BottomNav,
+  NAV_GROUPS,
+  MAIN_BOTTOM_PAD,
+  type Page,
+  type NavGroupKey,
+} from "./BottomNav";
+import { PillTabs } from "./PillTabs";
 import { Home } from "./Home";
 import { Insights } from "./Insights";
 import { DictionaryPane } from "./DictionaryPane";
@@ -104,8 +111,26 @@ function ErrorBanner({
 }
 
 
+const DEFAULT_GROUP_CHILDREN: Record<NavGroupKey, Page> = {
+  home: "home",
+  notes: "meetings",
+  flow: "scratchpad",
+  settings: "settings",
+};
+
 export function App() {
-  const [page, setPage] = useState<Page>("home");
+  const [activeGroup, setActiveGroup] = useState<NavGroupKey>("home");
+  const [activeChildren, setActiveChildren] = useState<Record<NavGroupKey, Page>>(DEFAULT_GROUP_CHILDREN);
+
+  const navigateTo = (newPage: Page) => {
+    setActiveChildren((prev) => ({
+      ...prev,
+      [activeGroup]: newPage,
+    }));
+  };
+
+  const page = activeChildren[activeGroup] ?? "home";
+  const currentGroupDef = NAV_GROUPS.find((g) => g.key === activeGroup) ?? NAV_GROUPS[0];
   const [settings, setLocalSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [entered, setEntered] = useState(false);
   const [status, setStatus] = useState<Status>({
@@ -210,26 +235,40 @@ export function App() {
           onDismiss={() => setErrorDismissed(true)}
         />
       )}
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <Sidebar page={page} setPage={setPage} />
-        <main style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
-          <div style={{ padding: "36px 44px", margin: "0 auto", maxWidth: 1120 }}>
-            {page === "home" && <Home />}
-            {page === "meetings" && <MeetingsPane />}
-            {page === "library" && <LibraryPane />}
-            {page === "insights" && <Insights />}
-            {page === "scratchpad" && <ScratchpadPane />}
-            {page === "snippets" && <SnippetsPane />}
-            {page === "transforms" && <TransformsPane />}
-            {page === "style" && <StylePane />}
-            {page === "dictionary" && <DictionaryPane />}
-            {page === "settings" && (
-              <SettingsPane settings={settings} onChange={update} status={status} refresh={refresh} />
-            )}
-            {page === "help" && <Help />}
-          </div>
-        </main>
-      </div>
+      <main
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          paddingBottom: MAIN_BOTTOM_PAD,
+        }}
+      >
+        <div style={{ padding: "36px 44px", margin: "0 auto", maxWidth: 1120 }}>
+          {currentGroupDef.children.length > 1 && (
+            <div style={{ marginBottom: 24, display: "flex", justifyContent: "flex-start" }}>
+              <PillTabs
+                items={currentGroupDef.children}
+                activeKey={page}
+                onChange={navigateTo}
+              />
+            </div>
+          )}
+          {page === "home" && <Home />}
+          {page === "meetings" && <MeetingsPane />}
+          {page === "library" && <LibraryPane />}
+          {page === "insights" && <Insights />}
+          {page === "scratchpad" && <ScratchpadPane />}
+          {page === "snippets" && <SnippetsPane />}
+          {page === "transforms" && <TransformsPane />}
+          {page === "style" && <StylePane />}
+          {page === "dictionary" && <DictionaryPane />}
+          {page === "settings" && (
+            <SettingsPane settings={settings} onChange={update} status={status} refresh={refresh} />
+          )}
+          {page === "help" && <Help />}
+        </div>
+      </main>
+      <BottomNav activeGroup={activeGroup} onSelectGroup={setActiveGroup} />
     </div>
   );
 }

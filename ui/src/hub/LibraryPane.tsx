@@ -606,9 +606,9 @@ export function LibraryPane() {
         </Card>
       )}
 
-      {/* Main Library Layout: Folder sidebar + List or Detail view */}
+      {/* Main Library Layout: Folder list + List or Detail view */}
       <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 20 }}>
-        {/* Left: Folders Sidebar */}
+        {/* Left: Folders list */}
         <div>
           <Card pad={14} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div
