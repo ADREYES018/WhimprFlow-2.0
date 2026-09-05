@@ -409,6 +409,10 @@ export function LibraryPane() {
     });
   };
 
+  // Uses raw try/catch instead of useAction: this is a chat-shaped Q&A feed
+  // where each question needs its own error, and useAction.error is a single
+  // pane-wide string that cannot carry a per-item error. The error is stored
+  // on the individual QAItem instead and surfaces inline on that card.
   const handleMeetingAsk = async (question: string) => {
     if (!selectedMeeting) return;
     const meetingId = selectedMeeting.id;
@@ -448,6 +452,8 @@ export function LibraryPane() {
     }));
   };
 
+  // Same reasoning as handleMeetingAsk above: per-question errors need to
+  // live on the individual QAItem, not on useAction's single pane-wide error.
   const handleGlobalLibraryAsk = async (question: string) => {
     const tempId = `global-qa-${Date.now()}`;
     const newItem: QAItem = { id: tempId, question, answer: "", loading: true };

@@ -13,7 +13,7 @@
 - Never regress existing shipping features: dictation, transforms, snippets, scratchpad, or meeting recordings.
 - Match existing UI design conventions from `ui.tsx`, `theme.ts`, and `tokens/values.ts`. No ad-hoc colors.
 - Every Tauri command invocation goes through `api.ts` wrappers. Panes never call Tauri `invoke` directly.
-- All mutations and async actions handle errors through `useAction` without silently swallowing failures.
+- All mutations and async actions handle errors through `useAction` without silently swallowing failures, except the Q&A feed handlers (`handleMeetingAsk`, `handleGlobalLibraryAsk`), which use raw try/catch to store per-item errors on `QAItem.error` since `useAction.error` is a single pane-wide string and cannot carry a per-question error for a chat-shaped feed.
 - No em-dashes allowed anywhere in code or user-facing copy.
 - Run `ui/node_modules/.bin/tsc --noEmit` after every frontend change.
 - Run `cargo test` after every Rust change.

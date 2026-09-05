@@ -43,15 +43,27 @@ export function OatmealAskBar({
     setSubmitting(true);
     try {
       await onAsk(q);
+    } catch (err) {
+      // onAsk implementations are expected to catch their own errors and
+      // surface them via QAItem.error. This catch is only a fallback for
+      // when a caller does not follow that contract, so the failure does
+      // not become a silent unhandled rejection.
+      console.error("OatmealAskBar: onAsk rejected without handling its own error", err);
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleCopy = (id: string, text: string) => {
-    void navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 1500);
+      },
+      (err) => {
+        console.error("OatmealAskBar: clipboard write failed", err);
+      }
+    );
   };
 
   return (
