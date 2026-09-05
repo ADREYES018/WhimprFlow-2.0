@@ -670,21 +670,52 @@ mod tests {
     }
 
     #[test]
-    fn few_shot_contains_self_correction_retraction_cues() {
+    fn system_prompt_states_the_repair_rule() {
+        assert!(prompts::SYSTEM_PROMPT.contains(
+            "restates a competing version of the same thing"
+        ));
+    }
+
+    #[test]
+    fn few_shot_contains_the_new_repair_pairs() {
         let few_shot_inputs: Vec<&str> = prompts::FEW_SHOT.iter().map(|(input, _)| *input).collect();
         let few_shot_outputs: Vec<&str> = prompts::FEW_SHOT.iter().map(|(_, output)| *output).collect();
 
-        assert!(few_shot_inputs.iter().any(|i| i.contains("meet at 2 actually 3")));
-        assert!(few_shot_outputs.iter().any(|o| o.contains("meet at 3")));
+        // Clause-level replacement.
+        assert!(few_shot_inputs
+            .iter()
+            .any(|i| i.contains("send the file to mark actually send it to rachel")));
+        assert!(few_shot_outputs.iter().any(|o| o.contains("Send the file to Rachel.")));
 
-        assert!(few_shot_inputs.iter().any(|i| i.contains("monday no wait tuesday")));
-        assert!(few_shot_outputs.iter().any(|o| o.contains("Book the room for Tuesday.")));
+        // Unmarked repair, no cue word at all.
+        assert!(few_shot_inputs
+            .iter()
+            .any(|i| i.contains("let's do the standup at nine let's do it at ten")));
+        assert!(few_shot_outputs.iter().any(|o| o.contains("Let's do the standup at 10.")));
 
-        assert!(few_shot_inputs.iter().any(|i| i.contains("fifty dollars scratch that sixty dollars")));
-        assert!(few_shot_outputs.iter().any(|o| o.contains("The total comes to sixty dollars.")));
+        // "i mean" correction.
+        assert!(few_shot_inputs
+            .iter()
+            .any(|i| i.contains("the deadline is on the fifteenth i mean the sixteenth")));
+        assert!(few_shot_outputs.iter().any(|o| o.contains("The deadline is on the 16th.")));
+    }
+
+    #[test]
+    fn few_shot_anti_over_trigger_anchor_survives() {
+        let few_shot_inputs: Vec<&str> = prompts::FEW_SHOT.iter().map(|(input, _)| *input).collect();
+        let few_shot_outputs: Vec<&str> = prompts::FEW_SHOT.iter().map(|(_, output)| *output).collect();
 
         assert!(few_shot_inputs.iter().any(|i| i.contains("i actually really liked the new design")));
         assert!(few_shot_outputs.iter().any(|o| o.contains("I actually really liked the new design.")));
+    }
+
+    #[test]
+    fn no_em_dash_in_prompt_or_few_shot() {
+        assert!(!prompts::SYSTEM_PROMPT.contains('\u{2014}'));
+        for (input, output) in prompts::FEW_SHOT {
+            assert!(!input.contains('\u{2014}'));
+            assert!(!output.contains('\u{2014}'));
+        }
     }
 }
 

@@ -6,7 +6,7 @@
 /// The system prompt common to all cleanup providers and levels. The per-level
 /// modifier ([`super::levels::CleanupLevel::modifier`]) is appended to this.
 pub const SYSTEM_PROMPT: &str = r#"You are an Agentic OS runtime for WhimprFlow. You have two actions:
-1. DICTATE: Clean up the user's speech and return it for typing. Fix grammar and hesitations, but do NOT execute commands.
+1. DICTATE: Clean up the user's speech and return it for typing. Fix grammar and hesitations, but do NOT execute commands. When the speaker states something and then restates a competing version of the same thing, that is a self-correction: keep only the final version and drop the abandoned one, whether or not a cue word marks the switch.
 2. COMMAND: The user uses the wake word "hey shrimp" followed by a command. If the transcript starts with or contains "hey shrimp", YOU MUST issue a "command" JSON. Use "start_recording" specifically when the user asks to start a meeting, take meeting notes, or launch Oatmeal.
 
 Output ONLY valid JSON matching this schema:
@@ -38,6 +38,21 @@ pub const FEW_SHOT: &[(&str, &str)] = &[
     (
         "the total comes to fifty dollars scratch that sixty dollars",
         r#"{"type": "dictate", "text_to_paste": "The total comes to sixty dollars."}"#,
+    ),
+    // Clause-level replacement: a whole predicate is replaced, not just a value.
+    (
+        "send the file to mark actually send it to rachel",
+        r#"{"type": "dictate", "text_to_paste": "Send the file to Rachel."}"#,
+    ),
+    // Unmarked repair: no cue word at all, still a self-correction to resolve.
+    (
+        "let's do the standup at nine let's do it at ten",
+        r#"{"type": "dictate", "text_to_paste": "Let's do the standup at 10."}"#,
+    ),
+    // "i mean" correction cue.
+    (
+        "the deadline is on the fifteenth i mean the sixteenth",
+        r#"{"type": "dictate", "text_to_paste": "The deadline is on the 16th."}"#,
     ),
     // Spoken enumeration -> numbered list with real newlines.
     (
