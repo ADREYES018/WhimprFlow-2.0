@@ -502,6 +502,24 @@ git commit -m "feat(ui): add global collection Oatmeal ask bar and source naviga
 
 ### Task 5: Dictation Spoken Self-Correction Verification in `whimpr-cleanup`
 
+> **SUPERSEDED 2026-09-05.** The step text below was not implemented and must not be.
+> It mandates `assert_eq!(clean_dictation(input), expected)`, but no `clean_dictation`
+> function exists and none may be created: `crates/whimpr-core/src/cleanup/mod.rs:175`
+> records the decision that self-correction cue handling stays the model's job, because
+> a bare regex misfires on "I actually liked it". Cleanup is LLM-driven through
+> `prompts.rs` SYSTEM_PROMPT and FEW_SHOT, so exact-output assertions cannot pass
+> deterministically.
+>
+> What shipped instead, approved by the project owner: a standing speech-repair rule in
+> SYSTEM_PROMPT (Levelt's reparandum / interregnum / reparans structure), three added
+> FEW_SHOT pairs covering clause-level replacement, unmarked repair, and the "i mean"
+> cue, deterministic prompt-contract tests with no LLM in the loop, and an `#[ignore]`d
+> eval harness at `crates/whimpr-core/tests/repair_eval.rs` that runs on demand against
+> a real API key and skips cleanly without one. Cue vocabulary is grounded in the TRAINS
+> corpus editing-term frequencies; the unmarked pair exists because only about 4 percent
+> of real speech-recognition repairs carry an explicit editing term.
+> Commits: 633b2f8, e591e98.
+
 **Files:**
 - Modify/Verify: `crates/whimpr-core/src/cleanup/prompts.rs`
 - Test: `crates/whimpr-core/src/cleanup/tests.rs` (or equivalent test module)
