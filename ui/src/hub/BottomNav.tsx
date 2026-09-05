@@ -75,15 +75,6 @@ export const NAV_GROUPS: NavGroupDef[] = [
   },
 ];
 
-export function getGroupForPage(page: Page): NavGroupKey {
-  for (const group of NAV_GROUPS) {
-    if (group.children.some((c) => c.key === page)) {
-      return group.key;
-    }
-  }
-  return "home";
-}
-
 function NavButton({
   group,
   active,
@@ -94,10 +85,13 @@ function NavButton({
   onClick: () => void;
 }) {
   const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  const showTooltip = hover || focused;
 
   return (
     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-      {hover && (
+      {showTooltip && (
         <div
           role="tooltip"
           style={{
@@ -125,9 +119,22 @@ function NavButton({
         type="button"
         title={group.label}
         aria-label={group.label}
+        aria-current={active ? "page" : undefined}
         onClick={onClick}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        onFocus={(e) => {
+          try {
+            if (e.currentTarget.matches(":focus-visible")) {
+              setFocused(true);
+            }
+          } catch {
+            setFocused(true);
+          }
+        }}
+        onBlur={() => {
+          setFocused(false);
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -138,8 +145,9 @@ function NavButton({
           border: "none",
           cursor: "pointer",
           background: active ? theme.accentSoft : hover ? theme.hover : "transparent",
-          transition: "background 120ms ease, color 120ms ease",
+          transition: "background 120ms ease, color 120ms ease, box-shadow 120ms ease",
           outline: "none",
+          boxShadow: focused ? `0 0 0 2px ${theme.accent}` : undefined,
           padding: 0,
         }}
       >
@@ -157,14 +165,11 @@ function NavButton({
 }
 
 export interface BottomNavProps {
-  activeGroup?: NavGroupKey;
-  page?: Page;
+  activeGroup: NavGroupKey;
   onSelectGroup: (group: NavGroupKey) => void;
 }
 
-export function BottomNav({ activeGroup, page, onSelectGroup }: BottomNavProps) {
-  const currentGroup = activeGroup ?? (page ? getGroupForPage(page) : "home");
-
+export function BottomNav({ activeGroup, onSelectGroup }: BottomNavProps) {
   return (
     <nav
       aria-label="Bottom Navigation"
@@ -190,7 +195,7 @@ export function BottomNav({ activeGroup, page, onSelectGroup }: BottomNavProps) 
         <NavButton
           key={group.key}
           group={group}
-          active={group.key === currentGroup}
+          active={group.key === activeGroup}
           onClick={() => onSelectGroup(group.key)}
         />
       ))}

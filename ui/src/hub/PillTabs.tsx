@@ -23,6 +23,7 @@ function PillButton({
   onClick: () => void;
 }) {
   const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   return (
     <button
@@ -32,6 +33,16 @@ function PillButton({
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onFocus={(e) => {
+        try {
+          if (e.currentTarget.matches(":focus-visible")) {
+            setFocused(true);
+          }
+        } catch {
+          setFocused(true);
+        }
+      }}
+      onBlur={() => setFocused(false)}
       style={{
         border: "none",
         cursor: "pointer",
@@ -42,9 +53,14 @@ function PillButton({
         fontFamily: font.ui,
         color: active ? "#ffffff" : theme.textMuted,
         background: active ? theme.accent : hover ? theme.hover : "transparent",
-        transition: "background 120ms ease, color 120ms ease",
+        transition: "background 120ms ease, color 120ms ease, box-shadow 120ms ease",
         whiteSpace: "nowrap",
         outline: "none",
+        boxShadow: focused
+          ? active
+            ? `0 0 0 2px ${theme.cardBg}, 0 0 0 4px ${theme.accent}`
+            : `0 0 0 2px ${theme.accent}`
+          : undefined,
         lineHeight: 1.2,
       }}
     >
