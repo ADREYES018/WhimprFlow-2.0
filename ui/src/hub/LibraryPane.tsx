@@ -1743,18 +1743,16 @@ export function LibraryPane() {
               )}
 
               {/* Oatmeal Grounded Ask Bar for Meeting */}
-              <div style={{ marginTop: 24 }}>
-                <OatmealAskBar
-                  key={selectedMeeting.id}
-                  items={selectedMeeting ? (meetingQAHistory[selectedMeeting.id] ?? []) : []}
-                  onAsk={handleMeetingAsk}
-                  onDismiss={handleDismissMeetingQA}
-                  placeholder={`Ask anything about ${selectedMeeting.title}...`}
-                  suggestions={["Key decisions", "Action items", "Main topics", "Next steps", "Pillars / Takeaways"]}
-                  disabled={!selectedMeeting.transcribed}
-                  stickyBottom={true}
-                />
-              </div>
+              <OatmealAskBar
+                key={selectedMeeting.id}
+                items={selectedMeeting ? (meetingQAHistory[selectedMeeting.id] ?? []) : []}
+                onAsk={handleMeetingAsk}
+                onDismiss={handleDismissMeetingQA}
+                placeholder={`Ask anything about ${selectedMeeting.title}...`}
+                suggestions={["Key decisions", "Action items", "Main topics", "Next steps", "Pillars / Takeaways"]}
+                disabled={!selectedMeeting.transcribed}
+                fab={true}
+              />
             </div>
           ) : (
             /* Meeting List View */
