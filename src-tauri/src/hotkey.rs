@@ -568,11 +568,16 @@ mod imp {
                             &whimpr_core::cleanup::post_process(&text),
                             &vocab,
                         );
-                        if whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level, settings.style_enabled).passed() {
-                            text
-                        } else {
-                            eprintln!("[whimpr] cleanup gate rejected the edit — pasting raw");
-                            raw_out
+                        match whimpr_core::cleanup::evaluate_gates(&raw_out, &text, level, settings.style_enabled) {
+                            whimpr_core::cleanup::GateVerdict::Pass => text,
+                            whimpr_core::cleanup::GateVerdict::Fail(reason) => {
+                                eprintln!(
+                                    "[whimpr] cleanup gate rejected the edit ({reason:?}), pasting raw\n\
+                                     [whimpr]   raw:     \"{raw_out}\"\n\
+                                     [whimpr]   dropped: \"{text}\""
+                                );
+                                raw_out
+                            }
                         }
                     }
                 }

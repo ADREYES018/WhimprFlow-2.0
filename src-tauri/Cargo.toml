@@ -21,7 +21,7 @@ whimpr-asr = { path = "../crates/whimpr-asr" }
 whimpr-cleanup = { path = "../crates/whimpr-cleanup" }
 whimpr-meetings = { path = "../crates/whimpr-meetings" }
 whimpr-notes = { path = "../crates/whimpr-notes" }
-keyring = "3"
+keyring = { version = "3", features = ["apple-native"] }
 strsim = "0.11"
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 serde = { workspace = true }

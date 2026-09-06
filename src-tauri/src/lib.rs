@@ -438,12 +438,17 @@ fn set_api_key(provider: String, key: String) -> Result<(), String> {
     let entry =
         keyring::Entry::new("com.whimpr.whimprflow", account).map_err(|e| e.to_string())?;
     let key = key.trim();
+    eprintln!("[whimpr] set_api_key({provider}): received {} chars", key.len());
+    // An empty key is never an intentional save, it is a cleared input or a UI
+    // remount. Refuse it, rather than silently deleting a working credential and
+    // reporting success.
+    if key.is_empty() {
+        return Err("no key provided, paste the key and click Save again".into());
+    }
     // Delete any existing item first so the new one is created by (and readable to)
     // this app — a key added via the `security` CLI isn't readable by the app.
     let _ = entry.delete_credential();
-    if !key.is_empty() {
-        entry.set_password(key).map_err(|e| e.to_string())?;
-    }
+    entry.set_password(key).map_err(|e| e.to_string())?;
     hotkey::rebuild_providers();
     Ok(())
 }

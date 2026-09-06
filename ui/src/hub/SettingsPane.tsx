@@ -43,10 +43,12 @@ function KeyField({
 }: {
   label: string;
   configured: boolean;
-  onSave: (key: string) => void;
+  onSave: (key: string) => Promise<void>;
 }) {
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   return (
     <div style={{ marginTop: 16 }}>
       <div style={{ fontSize: 13, marginBottom: 7, display: "flex", alignItems: "center", color: theme.textBody }}>
@@ -61,6 +63,7 @@ function KeyField({
           onChange={(e) => {
             setValue(e.target.value);
             setSaved(false);
+            setError(null);
           }}
           style={{
             flex: 1,
@@ -76,16 +79,30 @@ function KeyField({
           }}
         />
         <Button
-          onClick={() => {
-            onSave(value);
-            setValue("");
-            setSaved(true);
+          onClick={async () => {
+            setSaving(true);
+            setError(null);
+            try {
+              await onSave(value);
+              setValue("");
+              setSaved(true);
+            } catch (e) {
+              setSaved(false);
+              setError(String(e));
+            } finally {
+              setSaving(false);
+            }
           }}
         >
-          Save
+          {saving ? "Saving…" : "Save"}
         </Button>
       </div>
       {saved && <div style={{ fontSize: 12, color: theme.accentDeep, marginTop: 6 }}>Saved to keychain ✓</div>}
+      {error && (
+        <div style={{ fontSize: 12, color: "#ff6b6b", marginTop: 6 }}>
+          Could not save to keychain: {error}
+        </div>
+      )}
     </div>
   );
 }
@@ -232,8 +249,8 @@ export function SettingsPane({
         <KeyField
           label="OpenAI API key"
           configured={status.has_openai_key}
-          onSave={(k) => {
-            setApiKey("openai", k);
+          onSave={async (k) => {
+            await setApiKey("openai", k);
             setTimeout(refresh, 400);
           }}
         />
@@ -290,8 +307,8 @@ export function SettingsPane({
         <KeyField
           label="Anthropic API key"
           configured={status.has_anthropic_key}
-          onSave={(k) => {
-            setApiKey("anthropic", k);
+          onSave={async (k) => {
+            await setApiKey("anthropic", k);
             setTimeout(refresh, 400);
           }}
         />

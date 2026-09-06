@@ -202,11 +202,10 @@ export async function isTranscriptWindowVisible(): Promise<boolean> {
 }
 
 export async function setApiKey(provider: "openai" | "anthropic", key: string): Promise<void> {
-  try {
-    await invoke<void>("set_api_key", { provider, key });
-  } catch {
-    /* browser preview */
-  }
+  // Only the missing-shell case is ignorable. A real keychain failure must reach
+  // the caller, or the UI reports a save that never happened.
+  if (!("__TAURI_INTERNALS__" in window)) return;
+  await invoke<void>("set_api_key", { provider, key });
 }
 
 // ── History ────────────────────────────────────────────────────────────────

@@ -235,43 +235,6 @@ export function App() {
           onDismiss={() => setErrorDismissed(true)}
         />
       )}
-      {/* Wordmark + Local badge */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          padding: "16px 24px 0",
-          flex: "0 0 auto",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: font.serif,
-            fontSize: 20,
-            fontWeight: 600,
-            letterSpacing: -0.3,
-            color: theme.textStrong,
-          }}
-        >
-          WhimprFlow
-        </span>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            color: theme.accentDeep,
-            background: theme.accentSoft,
-            border: `1px solid ${theme.accentSoftBorder}`,
-            borderRadius: 999,
-            padding: "2px 7px",
-          }}
-        >
-          Local
-        </span>
-      </div>
       <main
         style={{
           flex: 1,
