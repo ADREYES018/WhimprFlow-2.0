@@ -1006,6 +1006,32 @@ mod imp {
         event
     }
 
+    /// Stop and finalize the current recording — the pill's red Stop button.
+    /// Drives the same state machine the Fn key does, so it works in either
+    /// mode. Reported dead in Publik Test 2 ("the red with the square in it").
+    pub fn stop_dictation() {
+        handle_input(Input::Trigger(TriggerToken::Stop { at_ms: now_ms() }));
+    }
+
+    /// Discard the current recording — the pill's ✕ button. Same path Esc would
+    /// take, if Esc were wired. Reported dead in Publik Test 2 ("the X button
+    /// doesn't work").
+    pub fn cancel_dictation() {
+        handle_input(Input::Trigger(TriggerToken::Cancel { at_ms: now_ms() }));
+    }
+
+    /// Toggle HANDS-FREE (locked) dictation — the customizable global hotkey
+    /// (default Cmd+Shift+Space) fires this. The state machine treats a
+    /// `HandsFree` press as a toggle: from idle it starts a locked session that
+    /// keeps recording with no key held, and while locked it finalizes. This is
+    /// the "speak without having to hold down fn" ask from Publik Test 2.
+    pub fn trigger_hands_free() {
+        handle_input(Input::Trigger(TriggerToken::Down {
+            binding: BindingId::HandsFree,
+            at_ms: now_ms(),
+        }));
+    }
+
     pub fn install(app: AppHandle) {
         let _ = APP.set(app);
         let _ = MACHINE.set(Mutex::new(StateMachine::new()));
@@ -1163,8 +1189,9 @@ mod imp {
 
 #[cfg(target_os = "macos")]
 pub use imp::{
-    current_settings, dictionary_add, dictionary_entries, dictionary_learn, dictionary_remove,
-    history, install, rebuild_providers, stats_summary, update_settings,
+    cancel_dictation, current_settings, dictionary_add, dictionary_entries, dictionary_learn,
+    dictionary_remove, history, install, rebuild_providers, stats_summary, stop_dictation,
+    trigger_hands_free, update_settings,
     snippets_all, snippet_add, snippet_update, snippet_remove,
     transforms_all, transform_add, transform_update, transform_remove, transform_run,
     scratchpad_get, scratchpad_set_text, scratchpad_set_capture,
@@ -1174,8 +1201,9 @@ pub use imp::{
 // Windows uses the real (but unverified) platform layer in `crate::win`.
 #[cfg(target_os = "windows")]
 pub use crate::win::{
-    current_settings, dictionary_add, dictionary_entries, dictionary_learn, dictionary_remove,
-    history, install, rebuild_providers, stats_summary, update_settings,
+    cancel_dictation, current_settings, dictionary_add, dictionary_entries, dictionary_learn,
+    dictionary_remove, history, install, rebuild_providers, stats_summary, stop_dictation,
+    trigger_hands_free, update_settings,
 };
 
 // Other platforms (Linux, etc.): inert stubs so the crate still builds.
@@ -1199,9 +1227,13 @@ mod other {
     pub fn dictionary_add(_correct: String, _mishears: Vec<String>) {}
     pub fn dictionary_remove(_correct: &str) {}
     pub fn dictionary_learn(_correct: String, _mishears: Vec<String>) {}
+    pub fn stop_dictation() {}
+    pub fn cancel_dictation() {}
+    pub fn trigger_hands_free() {}
 }
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub use other::{
-    current_settings, dictionary_add, dictionary_entries, dictionary_learn, dictionary_remove,
-    history, install, rebuild_providers, stats_summary, update_settings,
+    cancel_dictation, current_settings, dictionary_add, dictionary_entries, dictionary_learn,
+    dictionary_remove, history, install, rebuild_providers, stats_summary, stop_dictation,
+    trigger_hands_free, update_settings,
 };

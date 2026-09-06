@@ -13,6 +13,7 @@ mod hotkey;
 mod local_llm;
 mod paste;
 mod window;
+mod permissions;
 #[cfg(target_os = "windows")]
 mod win;
 
@@ -125,8 +126,23 @@ fn get_settings() -> whimpr_core::Settings {
 }
 
 #[tauri::command]
-fn set_settings(settings: whimpr_core::Settings) {
+fn set_settings(app: tauri::AppHandle, settings: whimpr_core::Settings) {
     hotkey::update_settings(settings);
+    // The hands-free hotkey may have changed — re-register it from the new
+    // settings so a customized combo takes effect without a relaunch.
+    apply_hands_free_shortcut(&app);
+}
+
+/// Stop and finalize the current recording — the overlay pill's red Stop button.
+#[tauri::command]
+fn stop_dictation() {
+    hotkey::stop_dictation();
+}
+
+/// Discard the current recording — the overlay pill's ✕ button.
+#[tauri::command]
+fn cancel_dictation() {
+    hotkey::cancel_dictation();
 }
 
 /// Aggregated dictation stats for the Hub dashboard. `tz_offset_minutes` is the
@@ -272,23 +288,35 @@ fn propose_style_profile() -> Option<whimpr_core::StyleProfile> {
 }
 
 /// Permission + capability status shown in the Hub.
+///
+/// The permission half is a live read every time (see `permissions::snapshot`);
+/// nothing here is remembered between calls. The Hub no longer has to ask for it
+/// on a timer either — `permissions::watch` pushes the same shape at it on
+/// `whimpr://permissions` the moment macOS changes its mind.
 #[derive(Clone, Serialize)]
 struct StatusReport {
     accessibility: bool,
     microphone: bool,
     input_monitoring: bool,
     screen_recording: bool,
+    microphone_grant: permissions::Grant,
+    charged_to: Option<String>,
+    microphone_hint: Option<String>,
     has_openai_key: bool,
     has_anthropic_key: bool,
 }
 
 #[tauri::command]
 fn get_status() -> StatusReport {
+    let p = permissions::snapshot();
     StatusReport {
-        accessibility: paste::is_trusted(),
-        microphone: paste::microphone_granted(),
-        input_monitoring: paste::input_monitoring_granted(),
+        accessibility: p.accessibility,
+        microphone: p.microphone,
+        input_monitoring: p.input_monitoring,
         screen_recording: whimpr_audio::sysaudio::has_screen_capture_permission(),
+        microphone_grant: p.microphone_grant,
+        charged_to: p.charged_to,
+        microphone_hint: p.microphone_hint,
         has_openai_key: has_key("openai_api_key"),
         has_anthropic_key: has_key("anthropic_api_key"),
     }
@@ -321,18 +349,13 @@ extern "C" {
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
-/// Request microphone access: trigger the native prompt (bundle has a usage string)
-/// by briefly opening the input device, and open the Microphone settings pane.
+/// Request microphone access with AVFoundation so macOS registers this bundle in
+/// Privacy & Security, then open the Microphone settings pane.
 #[tauri::command]
 fn request_microphone() {
     #[cfg(target_os = "macos")]
     {
-        std::thread::spawn(|| {
-            if let Ok(h) = whimpr_audio::start(|_: &[f32]| {}) {
-                std::thread::sleep(std::time::Duration::from_millis(400));
-                let _ = h.stop();
-            }
-        });
+        paste::request_microphone_access();
         open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
     }
 }
@@ -915,12 +938,46 @@ fn show_or_create_hub<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// (Re)register the customizable hands-free global hotkey from the current
+/// settings — press once to start hands-free dictation, again to stop. Called at
+/// startup and whenever settings change. Best-effort: an unregisterable or empty
+/// accelerator just leaves the hotkey off (Fn push-to-talk and double-tap-Fn
+/// hands-free still work), never a crash.
+fn apply_hands_free_shortcut(app: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let global_shortcut = app.global_shortcut();
+    let _ = global_shortcut.unregister_all();
+    let accelerator = hotkey::current_settings().hands_free_hotkey;
+    if accelerator.trim().is_empty() {
+        return;
+    }
+    if let Err(e) = global_shortcut.register(accelerator.as_str()) {
+        eprintln!("[whimpr] hands-free hotkey '{accelerator}' could not be registered: {e}");
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            // The customizable hands-free hotkey lives here — the OS registers the
+            // chord, so pressing it fires our handler AND is suppressed from the
+            // focused app (a listen-only CGEvent tap could not consume a printable
+            // key like Space). Only the hands-free shortcut is ever registered, so
+            // any Pressed event is a hands-free toggle.
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|_app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        hotkey::trigger_hands_free();
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_settings,
             save_settings,
+            stop_dictation,
+            cancel_dictation,
             get_stats,
             get_history,
             get_dictionary,
@@ -1053,6 +1110,16 @@ pub fn run() {
             // Point whimpr_core::local_llm at that worker, so notes, recall and
             // study generation reach llama instead of erroring out.
             local_llm::register_providers();
+
+            // Register the customizable hands-free hotkey (default Cmd+Shift+Space).
+            apply_hands_free_shortcut(app.handle());
+
+            // Keep the permission rows honest without the Hub having to be awake
+            // to ask. This is what makes the setup screen's promise ("turns green
+            // the moment macOS applies it — no relaunch needed") actually true:
+            // the Hub's own timer stops within seconds of its window going away,
+            // and the reader is granting from System Settings precisely then.
+            permissions::watch(app.handle().clone());
 
             let open = MenuItem::with_id(app, "open", "Open WhimprFlow", true, None::<&str>)?;
             let demo_rec =

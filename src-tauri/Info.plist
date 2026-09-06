@@ -4,6 +4,10 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>WhimprFlow uses your microphone to transcribe what you say into text.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>WhimprFlow needs Accessibility access to type transcribed text into other apps and to detect the Fn key globally.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>WhimprFlow uses Input Monitoring for reliable key detection when triggering dictation.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>WhimprFlow captures system audio locally to transcribe what other participants say. Nothing is streamed off your machine.</string>
     <key>NSCalendarsUsageDescription</key>

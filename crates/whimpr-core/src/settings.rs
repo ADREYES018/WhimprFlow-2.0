@@ -95,8 +95,23 @@ pub struct Settings {
     #[serde(default = "default_true", alias = "micEnabled")]
     pub mic_enabled: bool,
 
+    /// The global hotkey that toggles HANDS-FREE (locked) dictation. Press once
+    /// to start talking, press again to stop, with no key held down. An
+    /// accelerator string in Tauri's format (e.g. "CmdOrCtrl+Shift+Space", the
+    /// default). Holding Fn (push-to-talk) and double-tapping Fn (hands-free)
+    /// still work regardless. An empty string disables the hands-free hotkey.
+    #[serde(default = "default_hands_free_hotkey")]
+    pub hands_free_hotkey: String,
+
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// The out-of-the-box hands-free hotkey. Chosen to stay clear of the common
+/// macOS system shortcuts (Cmd+Space is Spotlight, Ctrl+Cmd+Space is the emoji
+/// picker).
+pub fn default_hands_free_hotkey() -> String {
+    "CmdOrCtrl+Shift+Space".to_string()
 }
 
 impl Default for Settings {
@@ -123,6 +138,7 @@ impl Default for Settings {
             followup_custom: String::new(),
             chunk_seconds: default_chunk_seconds(),
             mic_enabled: true,
+            hands_free_hotkey: default_hands_free_hotkey(),
             extra: HashMap::new(),
         }
     }
@@ -176,6 +192,18 @@ mod tests {
         assert_eq!(s.command_provider, "auto");
         assert!(!s.style_enabled);
         assert!(s.snippets_enabled);
+        assert_eq!(s.hands_free_hotkey, "CmdOrCtrl+Shift+Space");
+    }
+
+    #[test]
+    fn a_user_set_hands_free_hotkey_survives_a_roundtrip() {
+        let custom = Settings {
+            hands_free_hotkey: "Alt+Space".to_string(),
+            ..Default::default()
+        };
+        let back: Settings =
+            serde_json::from_str(&serde_json::to_string(&custom).unwrap()).unwrap();
+        assert_eq!(back.hands_free_hotkey, "Alt+Space");
     }
 
     #[test]
@@ -190,6 +218,7 @@ mod tests {
         let s: Settings = serde_json::from_str(old).expect("old settings must still parse");
         assert_eq!(s.wake_word, "hey shrimp");
         assert!(s.snippets_enabled);
+        assert_eq!(s.hands_free_hotkey, "CmdOrCtrl+Shift+Space");
     }
 
     #[test]
